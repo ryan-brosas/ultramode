@@ -1,6 +1,6 @@
-# OMP Beads Template
+# Ultramode
 
-An OMP-native project template with br as the task tracking backbone and bv for graph-informed planning. Every phase queries the graph before acting. Clean, boring, mechanical.
+A standalone OMP extension that drives the beads workflow (`/create` → `/plan` → `/ship` → `/verify` → `/review` → `/pr`) autonomously. An LLM decision agent selects ready beads from br/bv output, decides whether each phase succeeded, and injects the next phase command via `sendUserMessage`. The loop stops at `/pr` — the human merges.
 
 @memory/project/project.md
 @memory/project/conventions.md
@@ -78,10 +78,9 @@ Always `--robot-*` for machine-readable output. Always `--format json` for parse
 | `/verify` | `bv --robot-alerts --format json` |
 | `/close` | `bv --robot-suggest --format json` |
 
-
 ## br Conventions
 
-- **Prefix:** `br-omp` (beads are `br-omp-<purpose>-<short-id>`, e.g. `br-omp-backbone-skill-1da`)
+- **Prefix:** `ultramode` (beads are `ultramode-<purpose>-<short-id>`, e.g. `ultramode-fpj`)
 - **Artifacts:** `.beads/artifacts/<bead-id>/` — prd.md, plan.md, tasks.md, completion-evidence.json, review-report.md
 - **Inspect before mutate:** `br show <id> --json` before any state change
 - **Claim atomically:** `br update <id> --claim --json`
@@ -164,6 +163,17 @@ Use specific queries. Prefer "What durable implementation constraints has the us
 
 If wiring Honcho directly later: use one shared workspace when agents should share memory, one stable peer ID per real user, sessions scoped to repo/conversation/task/import, and `observe_me: false` for deterministic assistant/tool peers when configurable. Avoid many tiny sessions for trickle data because Honcho reasoning batches around roughly 1,000 tokens per peer/session.
 
+## Extension Architecture
+
+The `ultramode` extension is a standalone OMP plugin package installable via `omp install`. It uses:
+
+- **`complete()`** from `@oh-my-pi/pi-ai` for LLM decisions (NOT `runEphemeralTurn` — that method is internal to `AgentSession` and not exposed to extensions)
+- **`pi.sendUserMessage(cmd, { deliverAs: "followUp" })`** for phase chaining (avoids re-entrancy deadlock in `turn_end`)
+- **`pi.appendEntry("ultramode-control", state)`** for state persistence (same pattern as autoresearch)
+- **`pi.exec("br", [...])`** / **`pi.exec("bv", [...])`** for work selection (same pattern as workflow-gate.ts)
+- **`pi.registerCommand("ultramode", { handler })`** for the `/ultramode on|off|status|continue` control command
+
+The `PHASE_WHITELIST` maps each phase to its successor: `selecting→/create`, `creating→/plan`, `planning→/ship`, `shipping→/verify`, `verifying→/review`, `reviewing→/pr`, `pr→null` (terminal). The loop stops at `/pr` and never injects the merge-phase command.
 
 ## Skills Map
 
@@ -189,14 +199,15 @@ If wiring Honcho directly later: use one shared workspace when agents should sha
 | `design-system` | When generating UI, choosing colors/fonts/spacing, implementing components, or reviewing visual output |
 
 Skills are decision trees, not reference manuals. They tell the agent *what to do* and *in what order*, not *everything about the topic*.
+
 ```
-omp-template/
+ultramode/
 ├── AGENTS.md                          # Delegates to .omp/AGENTS.md
 ├── .beads/                            # br workspace (SQLite + JSONL)
 │   ├── beads.db                       # SQLite database
 │   ├── beads.jsonl                    # Append-only journal
 │   └── artifacts/                     # Per-bead artifact directories
-│       └── <bead-id>/                 # e.g. br-omp-backbone-skill-1da
+│       └── <bead-id>/                 # e.g. ultramode-fpj
 │           ├── prd.md                 # Problem, outcome, acceptance criteria
 │           ├── prd.json               # Machine-readable requirements mirror
 │           ├── plan.md                # Scope, blast radius, steps, risks, verification
@@ -206,8 +217,8 @@ omp-template/
 │           ├── completion-evidence.json  # Verification commands and results
 │           └── review-report.md       # Parallel review findings and verdict
 ├── .omp/                              # OMP harness configuration
-│   ├── AGENTS.md                      # Canonical project context (loaded by OMP)
-│   ├── commands/                      # Slash commands (9)
+│   ├── AGENTS.md                      # This file — canonical project context
+│   ├── commands/                      # Slash commands
 │   │   ├── brainstorm.md
 │   │   ├── create.md
 │   │   ├── plan.md
@@ -217,7 +228,7 @@ omp-template/
 │   │   ├── pr.md
 │   │   ├── close.md
 │   │   └── init.md
-│   ├── skills/                        # Agent skills (17)
+│   ├── skills/                        # Agent skills
 │   │   ├── br/SKILL.md
 │   │   ├── bv/SKILL.md
 │   │   ├── backbone/SKILL.md
@@ -245,6 +256,11 @@ omp-template/
 │       ├── decisions.md               # Architecture decision records
 │       ├── gotchas.md                 # Known pitfalls and mitigations
 │       └── tech-stack.md              # Versions, verification commands, constraints
+├── index.ts                           # Extension entry point (factory function)
+├── prompts/                           # LLM prompt templates
+│   ├── selection-prompt.md            # Work-selection prompt
+│   └── decision-prompt.md             # Phase-decision prompt
+├── package.json                       # OMP plugin manifest
 ├── .gitignore
 └── README.md
 ```

@@ -1,49 +1,42 @@
 ---
 purpose: How we build — naming, code style, workflow, agent conventions, memory system
-updated: 2026-06-17
+updated: 2026-06-18
 ---
 
-# Conventions: OMP Beads Template
+# Conventions: Ultramode
 
 ## Naming
 
 - **Files:** `kebab-case.md`, `kebab-case.json`, `kebab-case.ts`
-- **Functions:** `camelCase` (TypeScript), `snake_case` (Python), `camelCase` (Go)
+- **Functions:** `camelCase` (TypeScript)
 - **Classes/Components:** `PascalCase`
 - **Constants:** `UPPER_SNAKE_CASE`
-- **Bead slugs:** `kebab-case` (e.g. `feat-auth-login`, `fix-null-check`)
-- **Bead prefix:** `br-omp`
+- **Bead slugs:** `kebab-case` (e.g. `ultramode-fpj`)
+- **Bead prefix:** `ultramode` (no `br-omp` prefix — this repo is the plugin, not the template)
 
 ## Languages by Purpose
 
 | Purpose | Language | Notes |
 |---------|----------|-------|
-| Agent instructions | Markdown | Skills, commands, memory files |
-| Configuration | JSON / YAML | settings, manifests |
-| Backend | N/A | Template repo — no backend runtime |
-| Frontend | N/A | Template repo — provides design system assets only |
-| Scripts | Python | `/init` hydration script |
+| Extension entry point | TypeScript | `index.ts` — OMP extension factory function |
+| Prompt templates | Markdown | `prompts/*.md` with `{placeholder}` tokens |
+| Configuration | JSON | `package.json` with `omp.extensions` field |
 
-Fill in the actual languages for your project. Agents use this to pick the right tool for the job.
+## Extension Structure
 
-## Skill Structure
-
-Every skill SKILL.md follows this pattern:
-- **When to use** — trigger conditions the agent matches against
-- **When NOT to use** — anti-patterns to avoid
-- **Process** — step-by-step instructions, not prose
-
-## Command Structure
-
-- **Executable commands** (`/pr`): `allowed-tools` frontmatter, `!` backtick injection, single-turn execution
-- **Descriptive commands** (`/plan`, `/ship`): multi-phase recipe with exact CLI commands, STOP conditions
-- Every bead-ID-taking command starts with the same Bead ID Resolution block
+The extension is a single `index.ts` file exporting a default factory function `(pi: ExtensionAPI) => void`. Structure:
+- State types (`UltramodeState`, `Phase`, decision interfaces)
+- Phase whitelist (`PHASE_WHITELIST`, `PHASE_FROM_COMMAND`)
+- Helper functions (`loadPrompt`, `extractText`, `parseDecision`, `checkArtifact`, `buildArtifactStatus`, `decide`)
+- Event handlers (`session_start`, `turn_end`, `tool_call`)
+- Command handler (`/ultramode` with on/off/status/continue subcommands)
 
 ## Git
 
-- **Branch:** `<type>/<bead-id>-<slug>` (e.g. `feat/a1b2-add-login`)
+- **Branch:** `feat/<bead-id>-<slug>` (e.g. `feat/ultramode-fpj-autonomous-engineer-extension`)
 - **Commit:** conventional commits — `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`
 - **PR title:** `<bead-id>: <one-line summary>`
+
 ## Workflow
 
 1. **Brainstorm** — `/brainstorm` explores codebase, identifies work
@@ -66,6 +59,20 @@ Every skill SKILL.md follows this pattern:
 - Always `--json` with br/bv commands — parseable output, no screen scraping
 - Resolve actor: `ACTOR="${BR_ACTOR:-assistant}"` on all br mutations
 
+## Key API Surface
+
+The extension uses these verified OMP extension APIs (types at `~/.bun/install/global/node_modules/@oh-my-pi/pi-coding-agent/dist/types/`):
+
+- `pi.on(event, handler)` — register event handlers (session_start, turn_end, tool_call)
+- `pi.sendUserMessage(content, { deliverAs: "followUp" })` — inject phase commands
+- `pi.appendEntry("ultramode-control", state)` — persist state to session journal
+- `pi.exec(cmd, args[])` — run shell commands (br, bv)
+- `pi.registerCommand(name, { handler })` — register `/ultramode` command
+- `ctx.model` / `ctx.modelRegistry.getApiKey(model)` — LLM model + API key resolution
+- `ctx.sessionManager.getBranch()` — reconstruct state from session journal
+- `ctx.ui.notify(message, type)` / `ctx.ui.setWidget(key, content)` — user feedback
+
+**Critical:** `runEphemeralTurn` does NOT exist on `ExtensionContext` or `ExtensionAPI`. Use `complete()` from `@oh-my-pi/pi-ai` instead.
 
 ## Honcho Memory
 
@@ -78,7 +85,7 @@ Every skill SKILL.md follows this pattern:
 
 ## Memory File Maintenance
 
-Memory files are the project's durable context — equivalent to CLAUDE.md. They MUST stay current.
+Memory files are the project's durable context. They MUST stay current.
 
 | File | What goes there | When to update |
 |------|----------------|----------------|
@@ -93,8 +100,3 @@ Memory files are the project's durable context — equivalent to CLAUDE.md. They
 2. Every `/close`: agent checks if any conventions/decisions/gotchas were discovered during the bead and proposes updates.
 3. Audit periodically: are conventions current? Architecture clear? Gotchas captured?
 4. Never let memory drift — stale memory is worse than no memory because it teaches wrong patterns.
-
-## UI Design
-
-For UI design rules (animation, components, icons, theme, craft), load `design-system/SKILL.md`. The design system is on-demand — not inlined in every session.
-

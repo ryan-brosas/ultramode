@@ -1,0 +1,34 @@
+{
+  "name": "ultramode",
+  "version": "0.1.0",
+  "description": "Autonomous senior-engineer loop for OMP — drives the beads workflow (create → plan → ship → verify → review → pr) via LLM decisions and sendUserMessage phase chaining, stopping at /pr for human merge",
+  "type": "module",
+  "main": "index.ts",
+  "scripts": {
+    "clean": "echo 'nothing to clean'",
+    "build": "echo 'nothing to build'",
+    "check": "echo 'nothing to check'"
+  },
+  "keywords": [
+    "omp",
+    "plugin",
+    "autonomous",
+    "workflow",
+    "beads",
+    "br",
+    "bv",
+    "agent"
+  ],
+  "license": "MIT",
+  "files": [
+    "index.ts",
+    "prompts/decision-prompt.md",
+    "prompts/selection-prompt.md",
+    "README.md"
+  ],
+  "omp": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

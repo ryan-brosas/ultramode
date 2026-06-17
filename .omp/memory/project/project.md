@@ -1,27 +1,26 @@
 ---
 purpose: Project vision, goals, success criteria, and current phase
-updated: 2026-06-17
+updated: 2026-06-18
 ---
 
 # Project: Ultramode
 
 ## The Goal
 
-An OMP extension that provides br/bv-powered workflow infrastructure for AI-agent-driven software development — task tracking, graph-informed planning, artifact generation, and quality gating.
+A standalone OMP extension package that drives the beads workflow (`/create` → `/plan` → `/ship` → `/verify` → `/review` → `/pr`) autonomously. An LLM decision agent selects ready beads from br/bv output, decides whether each phase succeeded, and injects the next phase command via `sendUserMessage`. The loop stops at `/pr` — the human merges.
 
 ## Success Criteria
 
-1. **Zero `<project-name>` or template placeholders in any `.omp/memory/project/` file** — `grep -r '<project-name>' .omp/memory/project/ --exclude=project.md` returns no matches
-2. **Every memory file is valid markdown with filled tables** — read each file; no orphan rows, consistent column counts
-3. **An agent loading this context can answer "what is this project" within 3 seconds** — `project.md` heading + goal is self-contained and understandable
-4. **Zero broken file references in memory files** — `grep -oP '\.omp/[\w/.-]+\.\w+' .omp/memory/project/*.md | while read f; do test -f "$f" || echo "$f"; done` returns no output
-
-Keep to 3-5 criteria. Each must be verifiable — "good UX" is not verifiable. "Zero uncaught exceptions in prod for 30 days" is.
+1. **Extension loads and `/ultramode status` works** — `omp install` completes, `session_start` fires, `/ultramode status` returns `mode=off, beadId=none, phase=none, retries=0`
+2. **LLM-driven decisions use `complete()` from `@oh-my-pi/pi-ai`** — zero references to `runEphemeralTurn` (method not accessible to extensions)
+3. **Phase chaining never injects `/close`** — `PHASE_WHITELIST` terminal case is `pr → idle`; every `sendUserMessage` call uses the whitelist
+4. **State survives session restart** — `appendEntry("ultramode-control", state)` persists; `getBranch()` reconstruction on `session_start` restores mode/beadId/phase/retries
+5. **Retry cap marks beads blocked** — after 3 retries, `br update --status blocked` fires and the loop picks the next bead
 
 ## Current Phase
 
-- **Status:** stable
-- **Milestone:** Memory audit phase integrated into /close — memory file drift detection, user approval gate, STOP on full rejection (br-omp-backbone-skill-close-memory-audit-tkt)
-- **Next:** Brainstorm new beads — memory maintenance cycle complete
+- **Status:** active
+- **Milestone:** Implementing `ultramode-fpj` — the autonomous senior-engineer loop extension (index.ts + prompts + package.json + README)
+- **Next:** Type-check, verify no `/close` injection paths, verify `complete()` usage, test `/ultramode status`
 
 Update this section after every milestone. An agent reading this must understand, within 3 seconds, what the project is doing right now.
