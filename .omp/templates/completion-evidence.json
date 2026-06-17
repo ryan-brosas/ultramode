@@ -1,0 +1,32 @@
+{
+  "beadId": "{bead-id}",
+  "status": "{pending|verified|failed}",
+  "summary": "{one-line verdict — what passed, what didn't, what's unresolved}",
+  "passedChecks": [
+    {
+      "command": "{exact command run}",
+      "expected": "{what should happen}",
+      "result": "{what actually happened}"
+    }
+  ],
+  "failedChecks": [
+    {
+      "command": "{exact command run}",
+      "expected": "{what should happen}",
+      "result": "{what actually happened}"
+    }
+  ],
+  "uncheckedRisks": [
+    "{risk from plan that wasn't verified — and why}"
+  ],
+  "artifacts": [
+    {
+      "path": "{relative path}",
+      "purpose": "{what this artifact proves or provides}"
+    }
+  ],
+  "followUps": [
+    "{bead-id or description of follow-up work}"
+  ]
+}
+

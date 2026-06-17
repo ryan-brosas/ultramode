@@ -1,0 +1,18 @@
+{
+  "beadId": "{bead-id}",
+  "type": "{feature|bugfix|chore|research|epic}",
+  "priority": {0|1|2|3|4},
+  "estimate_minutes": {minutes},
+  "requirements": [
+    {
+      "id": 1,
+      "text": "{Requirement description}",
+      "priority": "MUST",
+      "acceptance": "{Acceptance criteria — how to verify}"
+    }
+  ],
+  "success_criteria": [
+    "{Criterion 1}",
+    "{Criterion 2}"
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "beadId": "ultramode-fpj",
+  "type": "feature",
+  "priority": 1,
+  "estimate_minutes": 240,
+  "requirements": [
+    {"id": 1, "text": "The extension loads on session start when installed via omp install", "priority": "MUST", "acceptance": "omp install completes; session_start fires and ctx.ui.notify shows ultramode loaded"},
+    {"id": 2, "text": "/ultramode on activates the autonomous loop", "priority": "MUST", "acceptance": "Sets mode to on, persists state, triggers work selection"},
+    {"id": 3, "text": "/ultramode off deactivates the loop", "priority": "MUST", "acceptance": "Sets mode to off, persists state, stops injecting phase commands"},
+    {"id": 4, "text": "/ultramode status shows current state", "priority": "MUST", "acceptance": "Outputs mode, bead ID, phase, retry count, last decision"},
+    {"id": 5, "text": "/ultramode continue resumes after /pr", "priority": "MUST", "acceptance": "Picks next ready bead and starts /create"},
+    {"id": 6, "text": "On session_start with mode=on, selects work", "priority": "MUST", "acceptance": "Calls runEphemeralTurn with bv triage + br scheduler output"},
+    {"id": 7, "text": "On turn_end with mode=on, decides next action", "priority": "MUST", "acceptance": "Calls runEphemeralTurn with decision prompt containing last output, phase, artifacts, retries"},
+    {"id": 8, "text": "Decisions are LLM-driven, not mechanical", "priority": "MUST", "acceptance": "runEphemeralTurn is called; no regex matching of Next: markers"},
+    {"id": 9, "text": "Phase chaining uses sendUserMessage", "priority": "MUST", "acceptance": "ctx.session.sendUserMessage is called with next phase command when decision is proceed"},
+    {"id": 10, "text": "Extension stops at /pr", "priority": "MUST", "acceptance": "After /pr, mode set to idle, no /close injected"},
+    {"id": 11, "text": "Never runs /close", "priority": "MUST", "acceptance": "No code path injects /close; nextPhase terminal case is /pr"},
+    {"id": 12, "text": "Retry cap: 3 attempts per phase", "priority": "MUST", "acceptance": "retries >= 3 triggers br update --status blocked and picks next bead"},
+    {"id": 13, "text": "Tool-call scope enforcement", "priority": "SHOULD", "acceptance": "tool_call handler blocks edits outside worktree when active"},
+    {"id": 14, "text": "State survives restart", "priority": "MUST", "acceptance": "appendCustomEntry persists state; getBranch reconstructs on session_start"},
+    {"id": 15, "text": "Dashboard widget shows loop status", "priority": "SHOULD", "acceptance": "ctx.ui.setWidget renders mode, bead ID, phase, retries"},
+    {"id": 16, "text": "Decision prompt includes bv triage + br scheduler", "priority": "MUST", "acceptance": "Both prompts include bv and br JSON output"},
+    {"id": 17, "text": "Decision prompt includes bead artifacts", "priority": "SHOULD", "acceptance": "Prompt includes PRD title, plan status, evidence status"},
+    {"id": 18, "text": "Failure handling marks beads blocked", "priority": "MUST", "acceptance": "Retries exhausted or reject triggers br update --status blocked"},
+    {"id": 19, "text": "Notifications on key events", "priority": "SHOULD", "acceptance": "ctx.ui.notify on loop start, selection, phase advance, PR, blocked, stop"},
+    {"id": 20, "text": "Coexists with existing extensions", "priority": "MUST", "acceptance": "No conflicts with workflow-gate.ts or native-command-override.ts"}
+  ],
+  "success_criteria": [
+    "omp install works and extension loads on session start",
+    "/ultramode on starts the loop and selects work via LLM decision",
+    "Phase chaining uses sendUserMessage and stops at /pr",
+    "Decisions use runEphemeralTurn, not string matching",
+    "State survives restart via appendCustomEntry",
+    "Retry cap of 3 marks beads blocked and moves on",
+    "Never runs /close or auto-merges"
+  ]
+}

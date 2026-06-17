@@ -1,0 +1,399 @@
+/* ============================================================
+   OMP Workspace — CSS primitives
+   Base element styles for buttons, inputs, selects, tooltips.
+   Consumes tokens from tokens.css — load tokens.css first.
+   ============================================================ */
+
+/* ── Reset baseline ──────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* ── Buttons ───────────────────────────────────────────────────────
+   Five variants: default, primary, primary-ghost, ghost, subtle.
+   All share the same padding, radius, font, and transition. */
+button {
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 12px;
+  cursor: pointer;
+  transition:
+    background var(--dur-quick) var(--ease-out),
+    border-color var(--dur-quick) var(--ease-out),
+    color var(--dur-quick) var(--ease-out),
+    box-shadow var(--dur-quick) var(--ease-out);
+}
+
+button:hover:not(:disabled) {
+  background: var(--bg-subtle);
+  border-color: var(--border-strong);
+}
+
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Primary — accent fill, white label. The loudest button on screen. */
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+  font-weight: 500;
+  box-shadow: 0 1px 0 rgba(180, 90, 59, 0.18) inset, var(--shadow-xs);
+}
+button.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+/* Primary-ghost — panel bg, accent border + label. Softer than primary. */
+button.primary-ghost {
+  background: var(--bg-panel);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 500;
+}
+button.primary-ghost:hover:not(:disabled) {
+  background: var(--accent-tint);
+}
+
+/* Ghost — transparent bg, visible border. The quietest bordered button. */
+button.ghost {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text);
+}
+button.ghost:hover:not(:disabled) {
+  background: var(--bg-subtle);
+  border-color: var(--border-strong);
+}
+
+/* Ghost success flash — transient green state after a successful action.
+   Applied briefly (~2s) then removed. Replaces permanent success text. */
+button.ghost.is-success-flash {
+  border-color: var(--green-border);
+  background: var(--green-bg);
+  color: var(--green);
+}
+button.ghost.is-success-flash:hover:not(:disabled) {
+  background: var(--green-bg);
+}
+button.ghost.is-success-flash svg {
+  color: currentColor;
+}
+
+/* Subtle — subtle bg, no border. For secondary actions in dense toolbars. */
+button.subtle {
+  background: var(--bg-subtle);
+  border-color: transparent;
+  color: var(--text);
+}
+button.subtle:hover:not(:disabled) {
+  background: var(--bg-muted);
+}
+
+/* Icon-only button — tighter horizontal padding. */
+button.icon-btn {
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+/* ── Visually hidden (screen-reader only) ──────────────────────────
+   Keeps a live-region for actions whose visible feedback is too
+   transient for a screen reader to catch. Borrowed from Tailwind's
+   `sr-only`. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── Tooltip ───────────────────────────────────────────────────────
+   Fixed-position layer that follows the cursor. Narrow, single-line
+   by default; wraps for longer content. */
+.od-tooltip {
+  position: relative;
+}
+.od-tooltip-layer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 4000;
+  max-width: min(260px, calc(100vw - 16px));
+  padding: 5px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-sm);
+  color: var(--text-strong);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.2;
+  contain: layout paint style;
+  pointer-events: none;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  will-change: transform;
+}
+
+/* ── Inputs, Textareas, Selects ────────────────────────────────────
+   Unified base style. Focus ring uses --selected (blue), not --accent
+   (terracotta), so a focused input and a primary CTA can coexist. */
+input,
+textarea,
+select {
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+  width: 100%;
+  transition:
+    border-color var(--dur-quick) var(--ease-out),
+    box-shadow var(--dur-quick) var(--ease-out);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-faint);
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--selected);
+  box-shadow: 0 0 0 3px var(--selected-soft);
+}
+
+textarea {
+  resize: vertical;
+  font-family: inherit;
+}
+
+/* ── Native <select> normalization ─────────────────────────────────
+   Strips platform chrome so <select> matches <input> height. Paints
+   a custom chevron via background SVG. Theme-aware via [data-theme]. */
+select {
+  padding-right: 32px;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='%2374716b' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='3 5 6 8 9 5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 12px 12px;
+}
+select::-ms-expand {
+  display: none;
+}
+
+[data-theme='dark'] select {
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='%239a9690' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='3 5 6 8 9 5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 12px 12px;
+}
+
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme]) select {
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='%239a9690' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='3 5 6 8 9 5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    background-size: 12px 12px;
+  }
+}
+
+/* ── Custom select component (`.od-select`) ────────────────────────
+   For when native <select> styling isn't enough. Trigger + portal
+   menu pattern. */
+.od-select {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+.od-select-trigger {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  text-align: left;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    border-color var(--dur-quick) var(--ease-out),
+    box-shadow var(--dur-quick) var(--ease-out),
+    background var(--dur-quick) var(--ease-out);
+}
+
+.od-select-trigger:hover:not(:disabled),
+.od-select-trigger[aria-expanded='true'] {
+  border-color: var(--border-strong);
+  background: var(--bg-subtle);
+}
+
+.od-select-trigger:focus-visible,
+.od-select-trigger[aria-expanded='true'] {
+  outline: none;
+  border-color: var(--selected);
+  box-shadow: 0 0 0 3px var(--selected-soft);
+}
+
+.od-select-trigger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.od-select-trigger svg {
+  color: var(--text-muted);
+  transition: transform var(--dur-quick) var(--ease-out);
+}
+
+.od-select-trigger[aria-expanded='true'] svg {
+  transform: rotate(180deg);
+}
+
+.od-select-value,
+.od-select-option-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.od-select-menu {
+  z-index: 9000;
+  padding: 4px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  max-width: calc(100vw - 24px);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg);
+}
+
+.od-select-menu.portal {
+  position: fixed;
+}
+
+.od-select-menu.inline {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: min(280px, 48vh);
+}
+
+.od-select-option {
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.od-select-option:hover:not(:disabled),
+.od-select-option.active:not(:disabled) {
+  background: var(--bg-subtle);
+}
+
+.od-select-option.selected {
+  color: var(--text);
+  background: color-mix(in srgb, var(--selected) 9%, var(--bg-subtle));
+  font-weight: 600;
+}
+
+.od-select-option.selected:hover:not(:disabled),
+.od-select-option.selected.active:not(:disabled) {
+  background: color-mix(in srgb, var(--selected) 13%, var(--bg-subtle));
+}
+
+.od-select-option:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.od-select-option-check {
+  display: inline-flex;
+  justify-content: center;
+  color: var(--selected);
+  opacity: 0;
+}
+
+.od-select-option.selected .od-select-option-check {
+  opacity: 1;
+}
+
+/* ── Accordion (collapsible) ───────────────────────────────────────
+   Uses grid-template-rows: 0fr → 1fr for auto-height animation.
+   Pair with opacity fade and the canonical easing curve. */
+.accordion-collapsible {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--dur-enter) var(--ease-out);
+}
+
+.accordion-collapsible.expanded {
+  grid-template-rows: 1fr;
+}
+
+.accordion-collapsible-inner {
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity var(--dur-enter) var(--ease-out);
+}
+
+.accordion-collapsible.expanded .accordion-collapsible-inner {
+  opacity: 1;
+}
+
+/* ── Focus ring utility ────────────────────────────────────────────
+   Applies the standard focus-visible treatment to any element.
+   Use when the native :focus-visible outline isn't sufficient. */
+.focus-ring {
+  outline: none;
+  border-color: var(--selected);
+  box-shadow: 0 0 0 3px var(--selected-soft);
+}
