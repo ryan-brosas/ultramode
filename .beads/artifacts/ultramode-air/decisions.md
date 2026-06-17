@@ -1,0 +1,31 @@
+# Decisions: ultramode-air
+
+## Decision Log
+
+| # | Decision | Rationale | Confidence |
+|---|----------|-----------|------------|
+| 1 | Use `bun:test` as the test framework | Bun's built-in test runner. No external dependency needed. `bun test` works out of the box. Matches the project's "no npm dependencies" philosophy — the runtime provides the tool. Alternatives (vitest, jest) would add dependencies and config files. | High |
+| 2 | Add named exports to `index.ts` for testability | The functions under test (`parseDecision`, `reconstructState`, phase maps) are module-level declarations not currently exported. The `export` keyword only affects importability — it doesn't change runtime behavior. The default export (`export default function ultramode`) is unchanged. This is the minimal change to enable testing without refactoring the module structure. | High |
+| 3 | Use plain object mocks, not a mocking framework | The mock factory creates stubs with configurable return values using plain functions. No `sinon`, `jest.fn()`, or similar. Keeps the "no dependencies" philosophy. Each mock is a factory function returning a typed object with spy functions — simple, debuggable, no magic. | High |
+| 4 | Test error paths for `decide()` but not the success path | The success path calls `complete()` from `@oh-my-pi/pi-ai` which requires a real API key and model. Can't test without network calls. The error paths (no model, no API key, completeSimple fallback) are fully testable with mocks. The success path is a live integration test — separate bead. | High |
+| 5 | Map the 5 unchecked risks to specific test cases | Each unchecked risk from `completion-evidence.json` gets a concrete test: Risk 1 → `completeSimple` fallback, Risk 2 → `hasPendingMessages` guard, Risk 3 → `ctx.model` undefined, Risk 4 → empty scheduler fallback, Risk 5 → invalid JSON parsing. This converts "unchecked" to "checked" with evidence. | High |
+| 6 | If `mock.module()` for `@oh-my-pi/pi-ai` fails, fall back to dependency injection | Bun's `mock.module()` may not work with globally-resolved packages. Fallback: add an optional `completeFn` parameter to `decide()` defaulting to the imported `complete`. This is a minimal API change that enables testing without module mocking. If `mock.module()` works, no change to `decide()` needed. | Medium |
+
+## Rejected Alternatives
+
+| # | Alternative | Why Rejected | Risk if Re-introduced |
+|---|-------------|--------------|----------------------|
+| 1 | Test via the exported `ultramode()` factory only (behavior testing) | Indirect — would need to register handlers, emit events, and observe side effects. Hard to test specific functions like `parseDecision` in isolation. The factory registers event handlers and a command, but doesn't expose the internal logic. Would require complex event simulation that tests the mock, not the code. | Tests would be brittle and test the mock event system rather than the actual decision logic. |
+| 2 | Refactor `index.ts` into modules first, then test each module | Premature — the file is 926 lines with clear section headers, not hard to navigate. The refactor would be a separate bead with its own risks (import resolution in OMP extensions with multiple files is untested). Testing first gives a safety net for a future refactor. | A refactor without tests could silently break the decision loop. The refactor should come after tests exist. |
+| 3 | Use vitest with module mocking | Adds a dependency (vitest) and config file (vitest.config.ts). `bun:test` is built-in and sufficient. The project philosophy is "no npm dependencies" — adding vitest violates this. | Dependency bloat, config drift, and a second build system competing with bun. |
+| 4 | Don't export internals — test through `runSelection()` and `handleTurnEnd()` | These functions call `decide()` which calls `complete()` — can't test without a real API key. Only the error handling around them is testable. Testing `parseDecision` and `reconstructState` directly is more precise and doesn't require mocking the LLM call. | Tests would be integration-level, slow, and would require mocking the entire `complete()` pipeline just to test JSON parsing. |
+
+## Assumptions
+
+| # | Assumption | Validation | Invalidation Impact |
+|---|------------|------------|---------------------|
+| 1 | `bun:test` works without configuration in this project | Verified: `package.json` has `"type": "module"` and bun is the runtime. `bun test` should discover `test/*.test.ts` automatically. | If `bun:test` doesn't auto-discover tests, add a `test` script to `package.json` or a `bunfig.toml`. |
+| 2 | Named exports on `index.ts` don't break the OMP extension loader | OMP loads the extension via `package.json` → `omp.extensions` → `./index.ts` → default export. Named exports are standard ES module syntax and don't affect the default export. | If OMP's loader breaks on named exports (unlikely), fall back to a separate `internals.ts` file that re-exports the functions for testing only. |
+| 3 | Bun's `mock.module()` can mock `@oh-my-pi/pi-ai` | Bun supports `mock.module()` for ESM mocking. The package is globally installed. If global packages can't be mocked, use the dependency injection fallback (Decision #6). | If `mock.module()` fails, `decide()` gets an optional `completeFn` parameter. Minimal API change, enables testing without module mocking. |
+| 4 | The `SessionEntry` type from `@oh-my-pi/pi-coding-agent` is importable for type-safe mocks | The type is exported from the package's type definitions. If it's not directly importable, use a structural type that matches the shape. | If the type isn't importable, define a local `MockSessionEntry` interface with the same shape. |
+| 5 | `handleTurnEnd` can be tested by mocking `decide()` to return controlled decisions | `handleTurnEnd` calls `decide()` which calls `complete()`. If we mock `decide()` at the module level (via `mock.module` on `index.ts` itself), we can control the decision and verify `sendUserMessage` calls. Alternatively, if `decide()` is exported, we can spy on it. | If neither works, test the retry logic via the phase maps and `COMMAND_FROM_PHASE` consistency — verify the correct command is looked up for each phase. Less precise but still catches the retry-wrong-command bug. |

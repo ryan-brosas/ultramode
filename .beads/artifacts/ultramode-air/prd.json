@@ -1,0 +1,62 @@
+{
+  "beadId": "ultramode-air",
+  "type": "chore",
+  "priority": 2,
+  "estimate_minutes": 180,
+  "requirements": [
+    {
+      "id": 1,
+      "text": "parseDecision tests cover the backward brace-balanced scan fix",
+      "priority": "MUST",
+      "acceptance": "bun test test/parse-decision.test.ts exits 0; tests include brace-in-prose, multiple JSON objects, nested JSON, invalid action, null on no-match, empty string"
+    },
+    {
+      "id": 2,
+      "text": "reconstructState tests cover phase validation",
+      "priority": "MUST",
+      "acceptance": "bun test test/reconstruct-state.test.ts exits 0; tests include valid state, invalid phase fallback, corrupt data, missing fields, mode validation"
+    },
+    {
+      "id": 3,
+      "text": "Phase map consistency tests verify no /close injection",
+      "priority": "MUST",
+      "acceptance": "bun test test/phase-maps.test.ts exits 0; PHASE_WHITELIST has pr: null terminal, no /close in any map, COMMAND_FROM_PHASE is reverse of PHASE_FROM_COMMAND"
+    },
+    {
+      "id": 4,
+      "text": "Retry logic tests cover the stuck-loop bug fix",
+      "priority": "MUST",
+      "acceptance": "bun test test/retry-logic.test.ts exits 0; tests include retries increment, exhaust at MAX_RETRIES, no-command case resets to selection"
+    },
+    {
+      "id": 5,
+      "text": "Error path tests cover decide() failure modes",
+      "priority": "MUST",
+      "acceptance": "bun test test/error-paths.test.ts exits 0; tests include no model, no API key, completeSimple fallback"
+    },
+    {
+      "id": 6,
+      "text": "Mock factory provides reusable test infrastructure",
+      "priority": "MUST",
+      "acceptance": "test/mocks.ts exports mockExtensionAPI(), mockExtensionContext(), mockSessionManager() returning typed stubs"
+    },
+    {
+      "id": 7,
+      "text": "Test runner script works",
+      "priority": "SHOULD",
+      "acceptance": "bash test/run.sh runs all tests and exits 0"
+    },
+    {
+      "id": 8,
+      "text": "All tests pass together",
+      "priority": "MUST",
+      "acceptance": "bun test test/ exits 0"
+    }
+  ],
+  "success_criteria": [
+    "bun test test/ exits 0 with all test files passing",
+    "bun build index.ts --no-bundle exits 0 after adding named exports",
+    "grep -c '/close' index.ts returns 0",
+    "5 unchecked risks from completion-evidence.json have corresponding test cases"
+  ]
+}
