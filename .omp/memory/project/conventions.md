@@ -26,10 +26,11 @@ updated: 2026-06-18
 
 The extension is a single `index.ts` file exporting a default factory function `(pi: ExtensionAPI) => void`. Structure:
 - State types (`UltramodeState`, `Phase`, decision interfaces)
-- Phase whitelist (`PHASE_WHITELIST`, `PHASE_FROM_COMMAND`)
-- Helper functions (`loadPrompt`, `extractText`, `parseDecision`, `checkArtifact`, `buildArtifactStatus`, `decide`)
+- Phase maps (`PHASE_WHITELIST` phase→next command, `PHASE_FROM_COMMAND` command→phase, `COMMAND_FROM_PHASE` phase→starting command, `VALID_PHASES`, `ALLOWED_PHASE_COMMANDS`)
+- Helper functions (`loadPrompt`, `extractText`, `parseDecision` (backward brace-balanced scan), `checkArtifact`, `buildArtifactStatus`, `decide`)
 - Event handlers (`session_start`, `turn_end`, `tool_call`)
 - Command handler (`/ultramode` with on/off/status/continue subcommands)
+- Sequential phase enforcement: `proceed` validates `nextCommand` against `PHASE_WHITELIST[state.phase]`; retry uses `COMMAND_FROM_PHASE[state.phase]`
 
 ## Git
 

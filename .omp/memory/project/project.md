@@ -20,7 +20,7 @@ A standalone OMP extension package that drives the beads workflow (`/create` →
 ## Current Phase
 
 - **Status:** active
-- **Milestone:** Implementing `ultramode-fpj` — the autonomous senior-engineer loop extension (index.ts + prompts + package.json + README)
-- **Next:** Type-check, verify no `/close` injection paths, verify `complete()` usage, test `/ultramode status`
+- **Milestone:** `ultramode-fpj` complete — extension implemented, reviewed (5 bugs fixed), committed
+- **Next:** Brainstorm follow-up beads — end-to-end test, state persistence test, retry cap test, worktree enforcement
 
 Update this section after every milestone. An agent reading this must understand, within 3 seconds, what the project is doing right now.
