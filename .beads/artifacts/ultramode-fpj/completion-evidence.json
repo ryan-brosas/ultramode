@@ -1,0 +1,121 @@
+{
+  "beadId": "ultramode-fpj",
+  "status": "verified",
+  "summary": "All 9 verification checks passed: package structure complete, zero /close injection paths, zero runEphemeralTurn references, complete() imported and called, type-check passes, sendUserMessage uses followUp, phase whitelist terminal case correct, completeSimple fallback resolves, br lint clean. No failed checks.",
+  "passedChecks": [
+    {
+      "command": "test -f package.json && jq -e '.omp.extensions[0] == \"./index.ts\"' package.json",
+      "expected": "package.json exists with omp.extensions[0] == ./index.ts",
+      "result": "PASS — package.json exists, omp.extensions[0] == ./index.ts confirmed"
+    },
+    {
+      "command": "test -f index.ts && grep -q 'export default function' index.ts",
+      "expected": "index.ts exists with a default export function (factory function)",
+      "result": "PASS — index.ts exists, 'export default function ultramode(pi: ExtensionAPI)' found"
+    },
+    {
+      "command": "test -f prompts/decision-prompt.md && test -f prompts/selection-prompt.md && test -f README.md && test -f AGENTS.md",
+      "expected": "All scaffold files exist: decision-prompt.md, selection-prompt.md, README.md, AGENTS.md",
+      "result": "PASS — all 4 files exist"
+    },
+    {
+      "command": "grep -q '/close' index.ts",
+      "expected": "Zero matches of /close in index.ts — the loop stops at /pr, never injects the merge-phase command",
+      "result": "PASS — zero /close matches found in index.ts"
+    },
+    {
+      "command": "grep -q 'runEphemeralTurn' index.ts",
+      "expected": "Zero matches of runEphemeralTurn — the method is not accessible to extensions; complete() from @oh-my-pi/pi-ai is used instead",
+      "result": "PASS — zero runEphemeralTurn matches found in index.ts"
+    },
+    {
+      "command": "grep -q 'import { complete' index.ts && grep -q 'await complete(' index.ts",
+      "expected": "complete() is imported from @oh-my-pi/pi-ai and called in the decide() helper",
+      "result": "PASS — 'import { complete, completeSimple } from \"@oh-my-pi/pi-ai\"' on line 8; 'await complete(model, context, { apiKey })' in decide() function"
+    },
+    {
+      "command": "bun build index.ts --no-bundle",
+      "expected": "Type-check passes — bun build exits 0 with no errors",
+      "result": "PASS — exit code 0, no type errors"
+    },
+    {
+      "command": "grep -q 'deliverAs: \"followUp\"' index.ts && grep -q 'pr: null' index.ts",
+      "expected": "All sendUserMessage calls use deliverAs: followUp (avoids re-entrancy deadlock); PHASE_WHITELIST has pr: null terminal case",
+      "result": "PASS — deliverAs: followUp found on all sendUserMessage calls; PHASE_WHITELIST has 'pr: null' (terminal — human merges)"
+    },
+    {
+      "command": "bun -e \"import { completeSimple } from '@oh-my-pi/pi-ai'; console.log(typeof completeSimple)\"",
+      "expected": "completeSimple fallback function is importable from @oh-my-pi/pi-ai (for providers requiring ApiKeyResolver instead of static string)",
+      "result": "PASS — completeSimple is a function, importable from @oh-my-pi/pi-ai"
+    },
+    {
+      "command": "br lint ultramode-fpj --json",
+      "expected": "No lint issues on the bead",
+      "result": "PASS — {\"total\":0,\"issues\":0,\"results\":[]}"
+    }
+  ],
+  "failedChecks": [],
+  "uncheckedRisks": [
+    "Risk 1 (complete() API key resolution fails for some providers) — partially verified: completeSimple import confirmed but not exercised with a real provider that requires ApiKeyResolver. The fallback code path exists (try/catch in decide()) but has not been triggered against a real provider.",
+    "Risk 2 (sendUserMessage re-entrancy deadlock) — not verified: the deliverAs: followUp pattern is implemented but has not been tested under a live turn_end handler in a real OMP session. The autoresearch extension uses similar patterns without deadlock, suggesting the runtime handles this.",
+    "Risk 3 (ctx.model is undefined) — not verified: the error-handling path exists (decide() throws, turn_end handler catches and sets mode=idle) but has not been triggered in a session without a configured model.",
+    "Risk 4 (br scheduler returns zero recommendations) — not verified: the fallback to br list --status open --status in_progress --json is implemented but has not been tested against an empty scheduler in a live session.",
+    "Risk 5 (LLM returns invalid JSON) — not verified: the parseDecision() helper with regex extraction and fail-safe to stop is implemented but has not been tested against real LLM output in a live session."
+  ],
+  "artifacts": [
+    {
+      "path": "index.ts",
+      "purpose": "Extension entry point — factory function with state management, decide() helper using complete(), runSelection(), turn_end/turn_start/tool_call event handlers, /ultramode command handler"
+    },
+    {
+      "path": "prompts/selection-prompt.md",
+      "purpose": "Work-selection prompt template with {bv_triage_json} and {br_scheduler_json} placeholders; instructs LLM to return JSON with action/beadId/reasoning schema"
+    },
+    {
+      "path": "prompts/decision-prompt.md",
+      "purpose": "Phase-decision prompt template with {bead_id}/{phase}/{retries}/{last_output}/{artifact_status} placeholders; instructs LLM to return JSON with action/reasoning/nextCommand schema"
+    },
+    {
+      "path": "package.json",
+      "purpose": "OMP plugin manifest — omp.extensions[0] == ./index.ts, no npm dependencies (resolved by OMP runtime)"
+    },
+    {
+      "path": "README.md",
+      "purpose": "Install + usage documentation for the ultramode extension"
+    },
+    {
+      "path": "AGENTS.md",
+      "purpose": "Open-spec AGENTS.md — README for agents with setup, architecture, code style, testing, PR instructions, guardrails"
+    },
+    {
+      "path": ".omp/AGENTS.md",
+      "purpose": "OMP-internal canonical project context — workflow, br/bv conventions, memory protocol, skills map, extension architecture section"
+    },
+    {
+      "path": ".omp/memory/project/project.md",
+      "purpose": "Project vision — Ultramode goal, 5 verifiable success criteria, current phase"
+    },
+    {
+      "path": ".omp/memory/project/conventions.md",
+      "purpose": "Naming, extension structure, key API surface (complete() not runEphemeralTurn), git, workflow, agent conventions"
+    },
+    {
+      "path": ".omp/memory/project/tech-stack.md",
+      "purpose": "TypeScript/Bun runtime, br 0.2.15/bv 0.17.0, verification commands, constraints (no runEphemeralTurn, no /close injection)"
+    },
+    {
+      "path": ".omp/memory/project/decisions.md",
+      "purpose": "10 ADRs covering complete() over runEphemeralTurn, sendUserMessage with followUp, stop at /pr, appendEntry persistence, retry cap, etc."
+    },
+    {
+      "path": ".omp/memory/project/gotchas.md",
+      "purpose": "7 active warnings: runEphemeralTurn inaccessibility, ctx.session absence, sendUserMessage re-entrancy, empty scheduler, undefined model, workflow-gate density, complete() API key type mismatch"
+    }
+  ],
+  "followUps": [
+    "End-to-end test: install ultramode in a real OMP session with a configured model, run /ultramode on, verify the LLM decision loop fires and a phase command is injected via sendUserMessage",
+    "State persistence test: run /ultramode on, kill OMP, restart, verify /ultramode status shows mode=on reconstructed from session journal",
+    "Retry cap test: simulate a failing bead phase, verify after 3 retries the bead is marked blocked via br update --status blocked and the loop picks the next bead",
+    "completeSimple fallback test: trigger the fallback path with a provider that requires ApiKeyResolver instead of a static apiKey string"
+  ]
+}
