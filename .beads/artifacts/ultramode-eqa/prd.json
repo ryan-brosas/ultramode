@@ -1,0 +1,65 @@
+{
+  "beadId": "ultramode-eqa",
+  "type": "bugfix",
+  "priority": 1,
+  "estimate_minutes": 30,
+  "requirements": [
+    {
+      "id": 1,
+      "text": "decide() must not hang longer than DECISION_TIMEOUT_MS (120s default)",
+      "priority": "MUST",
+      "acceptance": "Mock complete() to never resolve; call decide() with timeoutMs=50; verify it rejects within 200ms with a timeout error"
+    },
+    {
+      "id": 2,
+      "text": "decide() must pass signal: AbortSignal to both complete() and completeSimple()",
+      "priority": "MUST",
+      "acceptance": "Mock complete() and completeSimple() to capture their options arg; verify opts.signal is an AbortSignal instance; verify opts.signal.aborted is false at call time"
+    },
+    {
+      "id": 3,
+      "text": "On timeout, decide() must throw an Error whose message contains 'timed out'",
+      "priority": "MUST",
+      "acceptance": "Call decide() with a never-resolving mock; catch the error; verify err.message includes 'timed out'; verify err is an instance of Error"
+    },
+    {
+      "id": 4,
+      "text": "On normal completion, the timeout timer must be cleared (no leaked timers)",
+      "priority": "MUST",
+      "acceptance": "Call decide() with a fast-resolving mock; after completion, verify no timer is pending (bun test process exits cleanly — no hanging timers)"
+    },
+    {
+      "id": 5,
+      "text": "DECISION_TIMEOUT_MS must be exported as a named constant",
+      "priority": "MUST",
+      "acceptance": "import { DECISION_TIMEOUT_MS } from '../index.ts' succeeds; DECISION_TIMEOUT_MS === 120000"
+    },
+    {
+      "id": 6,
+      "text": "Existing tests must continue to pass (no regression)",
+      "priority": "MUST",
+      "acceptance": "bun test test/ exits 0; all 48+ existing tests pass unchanged"
+    },
+    {
+      "id": 7,
+      "text": "The timeout error must be caught by existing caller error handlers",
+      "priority": "SHOULD",
+      "acceptance": "Verify via code path analysis that runSelection and handleTurnEnd catch the timeout error and set state.mode = 'idle'. The existing try/catch blocks at index.ts:436-446 and index.ts:599-610 handle all errors from decide()."
+    },
+    {
+      "id": 8,
+      "text": "completeSimple() fallback path must also use the same timeout signal",
+      "priority": "MUST",
+      "acceptance": "When complete() throws (non-timeout) and completeSimple() is called as fallback, it must receive the same signal. Mock complete() to throw immediately, mock completeSimple() to capture opts, verify opts.signal is an AbortSignal."
+    }
+  ],
+  "success_criteria": [
+    "decide() rejects with a timeout error within 100ms of the timeout when complete() never resolves",
+    "decide() passes signal: AbortSignal to complete() and completeSimple()",
+    "On timeout, decide() throws Error with 'timed out' in message",
+    "DECISION_TIMEOUT_MS is exported and equals 120000",
+    "Timeout during completeSimple() fallback also rejects with 'timed out'",
+    "All existing tests pass (no regression) — bun test test/ exits 0",
+    "bun build index.ts --no-bundle succeeds (typecheck passes)"
+  ]
+}
