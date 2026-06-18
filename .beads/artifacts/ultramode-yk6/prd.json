@@ -1,0 +1,87 @@
+{
+  "beadId": "ultramode-yk6",
+  "type": "chore",
+  "priority": 2,
+  "estimate_minutes": 45,
+  "requirements": [
+    {
+      "id": 1,
+      "text": ".github/workflows/ci.yml exists and is valid YAML",
+      "priority": "MUST",
+      "acceptance": "ls .github/workflows/ci.yml succeeds; the file parses as valid YAML with name, on, jobs keys"
+    },
+    {
+      "id": 2,
+      "text": "CI triggers on push to main and pull_request to main",
+      "priority": "MUST",
+      "acceptance": "The on: key contains both push (with branches: [main]) and pull_request (with branches: [main])"
+    },
+    {
+      "id": 3,
+      "text": "CI installs Bun via oven-sh/setup-bun@v2",
+      "priority": "MUST",
+      "acceptance": "A step uses uses: oven-sh/setup-bun@v2; the job runs on ubuntu-latest"
+    },
+    {
+      "id": 4,
+      "text": "CI runs bun test test/",
+      "priority": "MUST",
+      "acceptance": "A step runs run: bun test test/; the step name is descriptive (e.g., Run tests)"
+    },
+    {
+      "id": 5,
+      "text": "CI runs bun build index.ts --target bun --external @oh-my-pi/pi-ai --external @oh-my-pi/pi-coding-agent",
+      "priority": "MUST",
+      "acceptance": "A step runs the build command with both --external flags; the step name is descriptive (e.g., Verify build)"
+    },
+    {
+      "id": 6,
+      "text": "CI fails on non-zero exit from any step",
+      "priority": "MUST",
+      "acceptance": "If bun test test/ or the build command exits non-zero, the CI job fails (GitHub Actions default behavior — no continue-on-error or || true to mask failures)"
+    },
+    {
+      "id": 7,
+      "text": "package.json build script runs bun build index.ts --target bun --external @oh-my-pi/pi-ai --external @oh-my-pi/pi-coding-agent",
+      "priority": "MUST",
+      "acceptance": "bun run build executes the build command and exits 0 (verified locally before merge)"
+    },
+    {
+      "id": 8,
+      "text": "package.json check script runs bun test test/",
+      "priority": "MUST",
+      "acceptance": "bun run check executes bun test test/ and exits 0 with 57 passing tests"
+    },
+    {
+      "id": 9,
+      "text": "package.json clean echo stub is removed",
+      "priority": "MUST",
+      "acceptance": "grep -c '\"clean\"' package.json returns 0; the scripts object contains only build and check"
+    },
+    {
+      "id": 10,
+      "text": "CI workflow uses actions/checkout@v4 before Bun setup",
+      "priority": "SHOULD",
+      "acceptance": "A step uses uses: actions/checkout@v4 before the oven-sh/setup-bun@v2 step"
+    },
+    {
+      "id": 11,
+      "text": "CI job name is descriptive",
+      "priority": "SHOULD",
+      "acceptance": "The job has a name: key (e.g., ci or verify) rather than relying on the default"
+    },
+    {
+      "id": 12,
+      "text": "CI workflow file is committed to the repo",
+      "priority": "MUST",
+      "acceptance": "git status shows .github/workflows/ci.yml as a tracked file after commit"
+    }
+  ],
+  "success_criteria": [
+    ".github/workflows/ci.yml exists, is valid YAML, and triggers on push and pull_request to main",
+    "CI workflow runs bun test test/ (57 tests) and bun build index.ts --target bun --external with both OMP packages",
+    "package.json scripts are real commands: build runs bun build, check runs bun test, clean is removed",
+    "bun run check passes 57 tests with exit 0; bun run build exits 0",
+    "No continue-on-error or error masking in the CI workflow"
+  ]
+}
