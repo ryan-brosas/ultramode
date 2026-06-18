@@ -27,16 +27,20 @@ No npm `dependencies` in `package.json` — both are resolved by the OMP runtime
 ## Verification Commands
 
 ```bash
-# Build (typecheck + emit)
-bun build index.ts --no-bundle
-
-# Test (Bun built-in test runner)
+# Tests (57 tests across 5 files, uses mock.module interception)
+bun run check
+# or directly:
 bun test test/
 # or via runner script:
 bash test/run.sh
 
-# Build
-# (no build step — index.ts is loaded directly by OMP)
+# Build (syntax + import resolution verification)
+bun run build
+# or directly:
+bun build index.ts --target bun --external @oh-my-pi/pi-ai --external @oh-my-pi/pi-coding-agent
+
+# CI (runs automatically on push/PR to main via .github/workflows/ci.yml)
+# Manual check: gh run watch or check Actions tab on GitHub
 
 # Graph state (always available)
 bv --robot-triage --format json
@@ -63,3 +67,4 @@ br list --status open --status in_progress --json
 - **No compatibility shims:** Migrate every caller, leave no aliases or deprecated paths. Tests must exercise real code paths, not assert on constants.
 - **Token budget:** Keep each memory file under 2KB. Total memory context under 8KB.
 - **Verification gate:** Every bead must pass its verification commands before `/review` or `/pr`.
+- **CI:** GitHub Actions runs `bun test test/` + `bun build --external` on every push/PR to main. `--no-bundle` fails (OMP packages not in local node_modules). Use `--target bun --external @oh-my-pi/pi-ai --external @oh-my-pi/pi-coding-agent`.
