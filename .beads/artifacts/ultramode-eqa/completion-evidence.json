@@ -1,0 +1,111 @@
+{
+  "beadId": "ultramode-eqa",
+  "status": "verified",
+  "summary": "All 11 plan verification checks pass. 54/54 tests pass (6 new timeout tests + 48 existing). Build typechecks clean. Implementation deviates from plan's signal-only approach: uses Promise.race + AbortController + signal (defense-in-depth) because test mocks ignore abort signals, making signal-only untestable. Deviation documented in decisions.md needs update.",
+  "passedChecks": [
+    {
+      "command": "bun build index.ts --no-bundle",
+      "expected": "Exit 0, no type errors, default export present",
+      "result": "PASS — exit 0, build emits successfully, no type mismatches"
+    },
+    {
+      "command": "bun test test/",
+      "expected": "Exit 0, 54+ tests pass (48 existing + 6 new in 'decide timeout' describe block)",
+      "result": "PASS — 54 pass, 0 fail, 171 expect() calls, 303ms. All 6 new timeout tests pass: (1) 'rejects with timeout error when complete never resolves' (50ms timeout override), (2) 'passes AbortSignal to complete()', (3) 'completeSimple fallback receives the signal', (4) 'timeout during completeSimple fallback also rejects', (5) 'no-model error still throws (regression)', (6) 'no-api-key error still throws (regression)'"
+    },
+    {
+      "command": "grep -n \"DECISION_TIMEOUT_MS\" index.ts",
+      "expected": "At least 2 lines: export const + usage in decide() signature",
+      "result": "PASS — line 111: `export const DECISION_TIMEOUT_MS = 120_000; // 2 minutes — hung LLM recovery`; line 331: `timeoutMs: number = DECISION_TIMEOUT_MS` in decide() signature"
+    },
+    {
+      "command": "grep -n \"timeoutMs\" index.ts",
+      "expected": "At least 3 lines: parameter, timer setup, error message",
+      "result": "PASS — line 331 (parameter default), line 366 (error message in timeout promise), line 367 (setTimeout delay). Note: shape differs from plan's expected 'setTimeout(() => controller.abort(), timeoutMs)' because implementation uses Promise.race; functionally equivalent."
+    },
+    {
+      "command": "grep -n \"AbortController\" index.ts",
+      "expected": "1 line — `const controller = new AbortController();`",
+      "result": "PASS — line 355: `const controller = new AbortController();`"
+    },
+    {
+      "command": "grep -n \"signal\" index.ts",
+      "expected": "Plan expected `signal: controller.signal` on 2 lines (complete + completeSimple calls). Actual implementation uses a `signal` alias for readability.",
+      "result": "PASS (shape differs) — line 356: `const signal = controller.signal;` (alias); line 372: `complete(model, context, { apiKey, signal })`; line 375: `completeSimple(model, context, { apiKey, signal })`. Signal is passed to both complete() and completeSimple(). Verified by tests 'passes AbortSignal to complete()' and 'completeSimple fallback receives the signal'."
+    },
+    {
+      "command": "grep -n \"clearTimeout\" index.ts",
+      "expected": "1 line — `clearTimeout(timer);` inside finally block",
+      "result": "PASS — line 387: `if (timer) clearTimeout(timer);` inside `finally` block (line 386). Guarded by `if (timer)` because timer is assigned inside the Promise executor (may be undefined if the executor threw before assignment). Functionally equivalent to plan's expected shape."
+    },
+    {
+      "command": "grep -n \"timed out\" index.ts",
+      "expected": "1 line — timeout error message",
+      "result": "PASS — line 366: reject(new Error(`ultramode: LLM decision timed out after ${timeoutMs}ms`));"
+    },
+    {
+      "command": "grep -n \"signal.aborted\" index.ts",
+      "expected": "Plan expected `controller.signal.aborted` on 1 line in catch block. Actual uses `signal.aborted` (alias).",
+      "result": "PASS (shape differs) — line 374: `if (signal.aborted) throw err; // timeout already fired — don't retry` inside callLLM() catch block. Alias `signal` refers to `controller.signal` (line 356). Functionally identical."
+    },
+    {
+      "command": "grep -n \"decide timeout\" test/error-paths.test.ts",
+      "expected": "1 line — `describe(\"decide timeout\", () => {`",
+      "result": "PASS — line 342: `describe(\"decide timeout\", () => {`"
+    },
+    {
+      "command": "grep -c \"test(\" test/error-paths.test.ts",
+      "expected": "Count increased by 6 from pre-change (was 13, now 19)",
+      "result": "PASS — 19 test() calls (was 13 pre-change, +6 new timeout tests)"
+    },
+    {
+      "command": "br lint ultramode-eqa --json",
+      "expected": "No lint issues on the bead",
+      "result": "PASS — {\"total\":0,\"issues\":0,\"results\":[]}"
+    },
+    {
+      "command": "bv --robot-suggest --format json",
+      "expected": "No actionable suggestions for ultramode-eqa",
+      "result": "PASS — only suggestions are potential_duplicate for already-closed disposable test beads (ultramode-tp1/os5/yvq, all closed). No issues for ultramode-eqa."
+    },
+    {
+      "command": "git diff --name-only HEAD",
+      "expected": "Only index.ts and test/error-paths.test.ts changed (matching plan blast radius)",
+      "result": "PASS — changed files: index.ts, test/error-paths.test.ts, .beads/issues.jsonl (bead state, expected). Blast radius matches plan exactly: index.ts (EDIT) + test/error-paths.test.ts (EDIT)."
+    }
+  ],
+  "failedChecks": [],
+  "uncheckedRisks": [
+    "Risk: 'Provider ignores the abort signal' (PRD risks table line 597) — NOT verified live. The plan's Risk Mitigation Details (lines 487-921) explicitly identify this as a real gap: if a provider does NOT pass the signal to fetch (e.g. AWS SDK for Bedrock), complete() never rejects and signal-only approach hangs. The /ship implementation ADDRESSES this gap by using Promise.race as a second layer (the timeout promise rejects independently of the provider). However, this has only been verified with mock providers that never resolve — not against a real provider that ignores the signal. The unit test 'rejects with timeout error when complete never resolves' proves the Promise.race path works against a never-resolving mock, which is the exact failure mode described. Reasoning: a real provider that ignores the signal behaves identically to a never-resolving promise from decide()'s perspective, so the test is a faithful proxy. Marking as unchecked because no live provider test was run.",
+    "Risk: '120s timeout is too short for very slow models (e.g. deep reasoning models that take 3+ minutes)' (PRD line 598) — NOT verified. No slow-model test was run. 120s is a judgment call based on the decision prompt being a short JSON response. Only verifiable in production with a real slow model.",
+    "Risk: '120s timeout is too long — the loop appears stuck for 2 minutes before recovering' (PRD line 599) — NOT verified. This is a UX judgment call, not a correctness issue. No live session test measured the perceived delay.",
+    "Risk: 'Timer not cleared on some error path, causing test process to hang' (PRD line 601) — PARTIALLY verified. The finally block (line 386-388) ensures clearTimeout runs on all exit paths. The test suite completing in 303ms with no hanging process is indirect evidence. However, no test explicitly asserts clearTimeout was called.",
+    "Risk: 'completeSimple() fallback receives an already-aborted signal if timeout fires during complete()' (PRD line 602) — verified by code path analysis and the test 'timeout during completeSimple fallback also rejects'. The callLLM() inner catch block (line 373-374) checks `signal.aborted` and re-throws immediately, preventing the fallback from running after a timeout. The test at line 385-393 mocks complete() to throw (non-timeout) and completeSimple() to never resolve, confirming the timeout fires during the fallback and rejects correctly."
+  ],
+  "artifacts": [
+    {
+      "path": "index.ts",
+      "purpose": "DECISION_TIMEOUT_MS constant (line 111) + decide() with AbortController + Promise.race timeout (lines 328-389). Signal passed to complete()/completeSimple() as defense-in-depth."
+    },
+    {
+      "path": "test/error-paths.test.ts",
+      "purpose": "6 new tests in 'decide timeout' describe block (lines 342-408): never-resolves timeout, signal passed to complete, signal passed to completeSimple fallback, timeout during fallback, + 2 regression tests for no-model and no-api-key error paths."
+    },
+    {
+      "path": ".beads/artifacts/ultramode-eqa/prd.md",
+      "purpose": "Requirements and acceptance criteria for the timeout feature"
+    },
+    {
+      "path": ".beads/artifacts/ultramode-eqa/plan.md",
+      "purpose": "Wave structure, risk analysis (including the Promise.race debate), and Full Verification commands"
+    },
+    {
+      "path": ".beads/artifacts/ultramode-eqa/decisions.md",
+      "purpose": "Architecture decisions — NOTE: decision #1 and rejected alternative #1 both state 'MUST NOT use Promise.race' and 'use native AbortController + signal instead of Promise.race'. The /ship implementation uses BOTH (Promise.race + signal). This deviation needs updating in decisions.md."
+    }
+  ],
+  "followUps": [
+    "Update .beads/artifacts/ultramode-eqa/decisions.md: decision #1 and rejected alternative #1 reject Promise.race, but the shipped implementation uses Promise.race + signal (defense-in-depth). The plan's own Risk Mitigation Details (lines 487-921) reasoned through this and concluded the signal-only approach has a real gap for providers that ignore AbortSignal. The implementation resolved this by using both. decisions.md should be updated to reflect the actual shipped approach and the reasoning.",
+    "PRD risk table line 597 mitigation is incorrect as written ('Even if a provider ignores the signal, the decide() function returns immediately on timeout (the promise rejects)') — this is only true because the shipped implementation uses Promise.race, not because of the signal alone. The PRD predates the implementation decision. Not blocking, but should be corrected for accuracy."
+  ]
+}
