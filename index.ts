@@ -67,6 +67,22 @@ export interface PhaseDecision {
   nextCommand: string | null;
 }
 
+/** Structural types for session branch entries. The OMP session journal
+ * stores entries with type: "message" containing a message object with
+ * role and content — we type only the fields we actually read. */
+interface BranchEntry {
+  type: string;
+  message?: unknown;
+}
+
+interface BranchMessageEntry {
+  type: "message";
+  message: {
+    role: string;
+    content: string | Array<{ type: string; text?: string }>;
+  };
+}
+
 // ─── Phase Whitelist ─────────────────────────────────────────────────────────
 
 // Maps each phase to the command that transitions out of it.
@@ -155,6 +171,10 @@ const sessionStates = new Map<string, UltramodeState>();
  * — if session_start's fire-and-forget runSelection is still running when
  * /ultramode on fires, the second call skips. */
 const selectionInProgress = new Set<string>();
+/** Tracks sessions where handleTurnEnd is in progress. Prevents re-entrancy
+ * — if decide() is still awaiting the LLM (up to 5 min), a second turn_end
+ * must not start a parallel evidence-gathering + LLM call. */
+const turnEndInProgress = new Set<string>();
 
 export function getState(ctx: ExtensionContext): UltramodeState {
   const key = ctx.sessionManager.getSessionId();
@@ -174,38 +194,58 @@ function persistState(
   pi.appendEntry(CONTROL_TYPE, { ...state });
 }
 
+function stripFrontmatter(content: string): string {
+  const match = /^---\r?\n[\s\S]*?\r?\n---\r?\n?([\s\S]*)$/.exec(content);
+  return (match ? match[1] : content).trimStart();
+}
+
+function substituteArgs(template: string, args: string): string {
+  return template.replace(/\$\{?ARGUMENTS\}?/g, args);
+}
+
+function expandPhaseCommand(command: string): string {
+  if (!command.startsWith("/")) return command;
+
+  const firstLineEnd = command.indexOf("\n");
+  const commandLine = firstLineEnd === -1 ? command : command.slice(0, firstLineEnd);
+  const suffix = firstLineEnd === -1 ? "" : command.slice(firstLineEnd);
+  const spaceIndex = commandLine.indexOf(" ");
+  const commandName =
+    spaceIndex === -1 ? commandLine.slice(1) : commandLine.slice(1, spaceIndex);
+  const args = spaceIndex === -1 ? "" : commandLine.slice(spaceIndex + 1).trim();
+  const path = resolvePath(process.cwd(), ".omp", "commands", `${commandName}.md`);
+
+  if (!existsSync(path)) return command;
+
+  const body = stripFrontmatter(readFileSync(path, "utf8"));
+  return `${substituteArgs(body, args)}${suffix}`;
+}
+
 /**
  * Inject a command via sendUserMessage and record it as lastInjectedCommand.
  * This is the single chokepoint for all command injection — turn_end uses
  * lastInjectedCommand to filter: only chain after turns ultramode triggered,
  * not after the user's own messages.
  *
- * `queued` controls delivery:
- *  - true (default): `deliverAs: "followUp"`. Used from turn_end, which fires
- *    after an assistant message — #canAutoContinueForFollowUp() sees last.role
- *    === "assistant" and drains the queue, auto-continuing the loop.
- *  - false: direct prompt (no deliverAs). Used from runSelection, which runs in
- *    command-handler or session_start context where the agent is idle with no
- *    recent assistant message. A followUp queued here would never drain
- *    (#canAutoContinueForFollowUp returns false when the last message isn't
- *    assistant/toolResult), so the loop would stall. Direct prompt triggers a
- *    real turn immediately. The autoresearch extension uses this same pattern
- *    (sendUserMessage(goalArg) with no deliverAs) from its command handler.
+ * Delivery controls where the expanded command body is queued:
+ *  - "followUp" (default): used from turn_end, after assistant output. It
+ *    waits for the current phase turn to finish before running the next phase.
+ *  - "steer": used from runSelection command/session_start paths. Direct
+ *    prompts can throw AgentBusyError while the slash-command turn is still
+ *    processing, and followUp-only may not auto-drain without an
+ *    assistant/tool tail. Steer queues safely and auto-drains from any tail.
  */
 function injectCommand(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   state: UltramodeState,
   command: string,
-  queued = true
+  delivery: "followUp" | "steer" = "followUp"
 ): void {
-  state.lastInjectedCommand = command;
+  const message = expandPhaseCommand(command);
+  state.lastInjectedCommand = message;
   persistState(pi, ctx, state);
-  if (queued) {
-    pi.sendUserMessage(command, { deliverAs: "followUp" });
-  } else {
-    pi.sendUserMessage(command);
-  }
+  pi.sendUserMessage(message, { deliverAs: delivery });
 }
 
 // Reconstruct state from the session journal by scanning for the last
@@ -298,6 +338,35 @@ export function extractText(message: unknown): string {
       .join("");
   }
   return "";
+}
+
+/**
+ * Detect whether the agent finished its turn or is still calling tools.
+ *
+ * OMP fires `turn_end` after EVERY LLM call, including intermediate turns
+ * where the assistant emitted `toolCall` blocks and will continue working.
+ * Running the decision loop on those turns means:
+ *   - spawning `bun test` + `bun build` + `bv` + an LLM call per tool call
+ *   - blocking the event loop with synchronous readFileSync in evidence gathering
+ *   - burning the server and freezing the terminal
+ *
+ * An assistant turn is "complete" (the agent is done, ready for our decision)
+ * when its content has NO `toolCall` blocks — only text/thinking. If any
+ * `toolCall` block is present, the agent is mid-work and will emit another
+ * turn after the tool results come back.
+ */
+export function isAgentTurnComplete(message: unknown): boolean {
+  if (!message || typeof message !== "object") return false;
+  const content = (message as { content?: unknown }).content;
+  if (typeof content === "string") return true;
+  if (!Array.isArray(content)) return false;
+  // If any block is a tool call, the agent is still working — wait.
+  return !content.some(
+    (block) =>
+      Boolean(block) &&
+      typeof block === "object" &&
+      (block as { type?: unknown }).type === "toolCall"
+  );
 }
 
 export function truncate(text: string, maxLen: number): string {
@@ -737,7 +806,7 @@ export async function runSelection(
       `ultramode: creating bead — ${description.slice(0, 80)}`,
       "info"
     );
-    injectCommand(pi, ctx, state, `/create ${description}`, false);
+    injectCommand(pi, ctx, state, `/create ${description}`, "steer");
     return;
   }
 
@@ -885,7 +954,7 @@ export async function runSelection(
       `ultramode: selected bead ${decision.beadId} — ${decision.reasoning}`,
       "info"
     );
-    injectCommand(pi, ctx, state, `/create ${decision.beadId}`, false);
+    injectCommand(pi, ctx, state, `/create ${decision.beadId}`, "steer");
   } else if (decision.action === "wait") {
     state.mode = "idle";
     persistState(pi, ctx, state);
@@ -905,7 +974,7 @@ export async function runSelection(
     );
     // Go to /brainstorm first, not /create. Brainstorm explores the
     // codebase and produces grounded ideas, then /create formalizes them.
-    injectCommand(pi, ctx, state, `/brainstorm ${decision.createDescription}`, false);
+    injectCommand(pi, ctx, state, `/brainstorm ${decision.createDescription}`, "steer");
   } else {
     ctx.ui.notify(
       "ultramode: selection returned an unrecognized action — idling",
@@ -1149,11 +1218,26 @@ function stopMergeWatcher(sessionId: string): void {
 export async function handleTurnEnd(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  message: any
+  message: unknown
 ): Promise<void> {
   const state = getState(ctx);
   if (state.mode !== "on") return;
+
+  // CRITICAL: Only run the decision loop when the agent has actually finished
+  // its turn — i.e., produced a final text response with no pending tool calls.
+  // OMP fires turn_end after every LLM call, including intermediate turns
+  // where the assistant emitted toolCall blocks and will continue working.
+  // Running evidence-gathering (bun test + bun build + readFileSync) + an LLM
+  // call on every intermediate turn burns the server and freezes the terminal.
+  if (!isAgentTurnComplete(message)) return;
+
+  // Re-entrancy guard: prevent overlapping handleTurnEnd calls. If the LLM
+  // decision is still in flight (decide() can take up to 5 minutes), a
+  // second turn_end must not start a parallel evidence-gathering + LLM call.
+  const sessionId = ctx.sessionManager.getSessionId();
+  if (turnEndInProgress.has(sessionId)) return;
+  turnEndInProgress.add(sessionId);
+  try {
 
   // Extract last assistant output
   const lastOutput = truncate(extractText(message), 2000);
@@ -1395,6 +1479,9 @@ export async function handleTurnEnd(
       startMergeWatcher(pi, ctx, state);
     }
   }
+  } finally {
+    turnEndInProgress.delete(sessionId);
+  }
 }
 
 // ─── Extension Factory ────────────────────────────────────────────────────────
@@ -1427,8 +1514,7 @@ export default function ultramode(pi: ExtensionAPI): void {
   // turn_end: the core decision loop
   pi.on(
     "turn_end",
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    async (event: any, ctx: ExtensionContext) => {
+    async (event: { message?: unknown }, ctx: ExtensionContext) => {
       // Only act if mode is on
       const state = getState(ctx);
       if (state.mode !== "on") return;
@@ -1444,12 +1530,13 @@ export default function ultramode(pi: ExtensionAPI): void {
         const lastUserEntry = [...branch]
           .reverse()
           .find(
-            (e) =>
+            (e): e is BranchMessageEntry =>
               e.type === "message" &&
-              (e as any).message?.role === "user"
+              typeof (e as BranchEntry).message === "object" &&
+              (e as BranchMessageEntry).message?.role === "user"
           );
         if (lastUserEntry) {
-          const msg = (lastUserEntry as any).message;
+          const msg = lastUserEntry.message;
           // Extract text from content blocks (array of {type:"text", text})
           // or plain string content
           let userText = "";
@@ -1457,8 +1544,14 @@ export default function ultramode(pi: ExtensionAPI): void {
             userText = msg.content;
           } else if (Array.isArray(msg.content)) {
             userText = msg.content
-              .filter((b: any) => b.type === "text" && typeof b.text === "string")
-              .map((b: any) => b.text)
+              .filter(
+                (b): b is { type: "text"; text: string } =>
+                  typeof b === "object" &&
+                  b !== null &&
+                  b.type === "text" &&
+                  typeof b.text === "string"
+              )
+              .map((b) => b.text)
               .join("\n");
           }
           // Extract just the command (first line, before any newline)
@@ -1491,8 +1584,7 @@ export default function ultramode(pi: ExtensionAPI): void {
   // tool_call: scope enforcement — block edits outside worktree when active
   pi.on(
     "tool_call",
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (event: any, ctx: ExtensionContext) => {
+    (event: { toolName?: string; input?: { path?: string } }, ctx: ExtensionContext) => {
       const state = getState(ctx);
 
       // Only enforce when worktreePath is set
@@ -1550,7 +1642,7 @@ export default function ultramode(pi: ExtensionAPI): void {
           updateWidget(ctx, state);
           ctx.ui.notify("ultramode: autonomous loop activated", "info");
           if (!state.beadId) {
-            await runSelection(pi, ctx, restArgs || undefined);
+            void runSelection(pi, ctx, restArgs || undefined);
           }
           break;
         }
@@ -1600,7 +1692,7 @@ export default function ultramode(pi: ExtensionAPI): void {
             "ultramode: continuing — selecting next bead",
             "info"
           );
-          await runSelection(pi, ctx);
+          void runSelection(pi, ctx);
           break;
         }
         default: {
