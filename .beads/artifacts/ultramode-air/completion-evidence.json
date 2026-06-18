@@ -1,7 +1,7 @@
 {
   "beadId": "ultramode-air",
   "status": "verified",
-  "summary": "All planned Bun tests, runner, build, bead lint, graph hygiene, and no-close invariant checks passed for the ultramode-air test harness implementation.",
+  "summary": "All planned Bun tests, runner, build, bead lint, graph hygiene, and no-close invariant checks passed after addressing 3 review findings. Test count increased from 44 to 48 with behavioral coverage of retry branch, hasPendingMessages guard, and scheduler fallback.",
   "passedChecks": [
     {
       "command": "bv --robot-triage --format json && bv --robot-alerts --format json && br show \"ultramode-air\" --json",
@@ -10,8 +10,8 @@
     },
     {
       "command": "git diff --name-only HEAD~1",
-      "expected": "Changed files include the planned 1 production edit and 7 new test/runner files, plus bead workflow artifacts.",
-      "result": "Exit 0. Output listed index.ts, test/error-paths.test.ts, test/mocks.ts, test/parse-decision.test.ts, test/phase-maps.test.ts, test/reconstruct-state.test.ts, test/retry-logic.test.ts, test/run.sh, and bead artifacts/sync files."
+      "expected": "Changed files include the 4 files touched by the review-fix commit: index.ts (new exports), test/mocks.ts (onHandlers), test/retry-logic.test.ts (behavioral tests), test/error-paths.test.ts (guard + fallback tests).",
+      "result": "Exit 0. Output listed exactly: index.ts, test/error-paths.test.ts, test/mocks.ts, test/retry-logic.test.ts."
     },
     {
       "command": "bun test test/parse-decision.test.ts",
@@ -30,28 +30,28 @@
     },
     {
       "command": "bun test test/retry-logic.test.ts",
-      "expected": "Retry invariant tests exit 0.",
-      "result": "Exit 0. 8 pass, 0 fail, 16 expect() calls."
+      "expected": "Retry logic tests exit 0, including behavioral tests that exercise the actual retry branch in handleTurnEnd.",
+      "result": "Exit 0. 9 pass, 0 fail, 30 expect() calls. Tests now invoke handleTurnEnd with mocked decide() returning {action:'retry'} and assert sendUserMessage receives COMMAND_FROM_PHASE (not PHASE_WHITELIST), retries increment, cap triggers markBlocked, and no-command case resets to selection."
     },
     {
       "command": "bun test test/error-paths.test.ts",
-      "expected": "decide/helper error path tests exit 0.",
-      "result": "Exit 0. 10 pass, 0 fail, 15 expect() calls."
+      "expected": "Error path tests exit 0, including hasPendingMessages guard tests and scheduler fallback tests.",
+      "result": "Exit 0. 13 pass, 0 fail, 36 expect() calls. Tests now register the ultramode() factory, capture the turn_end handler, and verify the guard skips handleTurnEnd when pending=true and proceeds when false. Scheduler fallback tests verify runSelection calls br list when scheduler returns empty recommendations."
     },
     {
       "command": "bash test/run.sh",
       "expected": "Runner executes bun test test/ and exits 0.",
-      "result": "Exit 0. 44 pass, 0 fail, 118 expect() calls across 5 files."
+      "result": "Exit 0. 48 pass, 0 fail, 153 expect() calls across 5 files."
     },
     {
       "command": "bun test test/",
       "expected": "All test files pass together.",
-      "result": "Exit 0. 44 pass, 0 fail, 118 expect() calls across 5 files."
+      "result": "Exit 0. 48 pass, 0 fail, 153 expect() calls across 5 files."
     },
     {
       "command": "bun build index.ts --no-bundle",
       "expected": "Named exports and default extension entry point build successfully.",
-      "result": "Exit 0. Bun emitted non-bundled JavaScript for index.ts with exported constants/functions and default ultramode factory."
+      "result": "Exit 0. Bun emitted non-bundled JavaScript for index.ts with exported constants/functions (including new exports: getState, runSelection, handleTurnEnd) and default ultramode factory."
     },
     {
       "command": "python3 - <<'PY'\nfrom pathlib import Path\nprint(Path('index.ts').read_text().count('/close'))\nPY",
@@ -78,11 +78,11 @@
   "artifacts": [
     {
       "path": "index.ts",
-      "purpose": "Provides named exports for existing testable internals while preserving the default OMP extension factory."
+      "purpose": "Provides named exports for testable internals including getState, runSelection, handleTurnEnd (added to address review findings). Preserves default OMP extension factory."
     },
     {
       "path": "test/mocks.ts",
-      "purpose": "Provides reusable mock ExtensionAPI, ExtensionContext, session manager, pi-ai module, and cache-busted test import helpers."
+      "purpose": "Provides reusable mock infrastructure including MockExtensionAPI with onHandlers map for capturing registered event handlers."
     },
     {
       "path": "test/parse-decision.test.ts",
@@ -98,11 +98,11 @@
     },
     {
       "path": "test/retry-logic.test.ts",
-      "purpose": "Proves retry command direction uses current-phase commands and retry cap/no-command invariants remain guarded."
+      "purpose": "Proves retry command direction uses current-phase commands and retry cap/no-command invariants remain guarded. Now exercises the actual retry branch via handleTurnEnd with mocked decide()."
     },
     {
       "path": "test/error-paths.test.ts",
-      "purpose": "Proves decide no-model/no-key failures, completeSimple fallback, hasPendingMessages mock behavior, extractText, and truncate helpers."
+      "purpose": "Proves decide no-model/no-key failures, completeSimple fallback, hasPendingMessages guard behavior via turn_end handler, and scheduler fallback to br list. extractText and truncate helpers."
     },
     {
       "path": "test/run.sh",
