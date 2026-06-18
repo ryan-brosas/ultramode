@@ -191,7 +191,12 @@ function persistState(
   ctx: ExtensionContext,
   state: UltramodeState
 ): void {
-  pi.appendEntry(CONTROL_TYPE, { ...state });
+  try {
+    pi.appendEntry(CONTROL_TYPE, { ...state });
+  } catch {
+    // Journal write failure — in-memory state is still correct.
+    // Next reconstructState will use the last successful write.
+  }
 }
 
 function stripFrontmatter(content: string): string {
@@ -252,49 +257,55 @@ function injectCommand(
 // ultramode-control custom entry. Same pattern as autoresearch's
 // reconstructControlState (autoresearch/state.ts:220).
 export function reconstructState(ctx: ExtensionContext): UltramodeState {
-  const entries = ctx.sessionManager.getBranch();
-  let reconstructed = createState();
-  for (const entry of entries) {
-    if (entry.type !== "custom" || entry.customType !== CONTROL_TYPE) continue;
-    const data = entry.data as Record<string, unknown> | undefined;
-    if (!data || typeof data !== "object") continue;
-    const candidate = data as Partial<UltramodeState>;
-    if (
-      candidate.mode !== "off" &&
-      candidate.mode !== "on" &&
-      candidate.mode !== "idle"
-    )
-      continue;
-    reconstructed = {
-      mode: candidate.mode,
-      beadId: typeof candidate.beadId === "string" ? candidate.beadId : null,
-      phase: VALID_PHASES.has(candidate.phase as Phase)
-        ? (candidate.phase as Phase)
-        : "selecting",
-      retries: typeof candidate.retries === "number" ? candidate.retries : 0,
-      lastDecision:
-        typeof candidate.lastDecision === "string"
-          ? candidate.lastDecision
-          : null,
-      worktreePath:
-        typeof candidate.worktreePath === "string"
-          ? candidate.worktreePath
-          : null,
-      lastInjectedCommand:
-        typeof candidate.lastInjectedCommand === "string"
-          ? candidate.lastInjectedCommand
-          : null,
-      retryFeedback:
-        typeof candidate.retryFeedback === "string"
-          ? candidate.retryFeedback
-          : null,
-      prUrl:
-        typeof candidate.prUrl === "string"
-          ? candidate.prUrl
-          : null,
-    };
+  try {
+    const entries = ctx.sessionManager.getBranch();
+    let reconstructed = createState();
+    for (const entry of entries) {
+      if (entry.type !== "custom" || entry.customType !== CONTROL_TYPE) continue;
+      const data = entry.data as Record<string, unknown> | undefined;
+      if (!data || typeof data !== "object") continue;
+      const candidate = data as Partial<UltramodeState>;
+      if (
+        candidate.mode !== "off" &&
+        candidate.mode !== "on" &&
+        candidate.mode !== "idle"
+      )
+        continue;
+      reconstructed = {
+        mode: candidate.mode,
+        beadId: typeof candidate.beadId === "string" ? candidate.beadId : null,
+        phase: VALID_PHASES.has(candidate.phase as Phase)
+          ? (candidate.phase as Phase)
+          : "selecting",
+        retries: typeof candidate.retries === "number" ? candidate.retries : 0,
+        lastDecision:
+          typeof candidate.lastDecision === "string"
+            ? candidate.lastDecision
+            : null,
+        worktreePath:
+          typeof candidate.worktreePath === "string"
+            ? candidate.worktreePath
+            : null,
+        lastInjectedCommand:
+          typeof candidate.lastInjectedCommand === "string"
+            ? candidate.lastInjectedCommand
+            : null,
+        retryFeedback:
+          typeof candidate.retryFeedback === "string"
+            ? candidate.retryFeedback
+            : null,
+        prUrl:
+          typeof candidate.prUrl === "string"
+            ? candidate.prUrl
+            : null,
+      };
+    }
+    return reconstructed;
+  } catch {
+    // Corrupt journal or getBranch() failure — return clean state
+    // rather than crashing session_start and preventing extension load.
+    return createState();
   }
-  return reconstructed;
 }
 
 // ─── Prompt Loading ──────────────────────────────────────────────────────────
@@ -759,6 +770,15 @@ export async function decide(
       return await complete(model, context, { apiKey, signal });
     } catch (err) {
       if (signal.aborted) throw err; // timeout already fired — don't retry
+      // Only fall back to completeSimple for provider-specific API shape
+      // errors (e.g., model doesn't support the complete() signature).
+      // Auth errors (401/403), rate limits (429), network errors, and
+      // server errors (5xx) will also fail with completeSimple using the
+      // same apiKey — retrying wastes up to 300s on a doomed call.
+      const msg = err instanceof Error ? err.message : String(err);
+      const isHttpError = /(?:401|403|429|5\d{2})\b/.test(msg) ||
+        /auth|api key|rate.?limit|forbidden|unauthorized|ECONNREFUSED|ETIMEDOUT|ENOTFOUND/i.test(msg);
+      if (isHttpError) throw err;
       return await completeSimple(model, context, { apiKey, signal });
     }
   }
@@ -878,18 +898,26 @@ export async function runSelection(
     bv_triage_json: triageJson,
     br_scheduler_json: schedulerJson,
   });
-  // 4. Call LLM
+  // 4. Call LLM — retry transient failures up to MAX_RETRIES before idling.
   let decisionText: string;
-  try {
-    decisionText = await decide(ctx, prompt);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    ctx.ui.notify(`ultramode: selection failed — ${msg}`, "error");
-    state.mode = "idle";
-    state.lastDecision = `selection error: ${msg}`;
-    persistState(pi, ctx, state);
-    updateWidget(ctx, state);
-    return;
+  let selectionRetries = 0;
+  while (true) {
+    try {
+      decisionText = await decide(ctx, prompt);
+      break; // success
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      selectionRetries++;
+      if (selectionRetries >= MAX_RETRIES) {
+        ctx.ui.notify(`ultramode: selection failed after ${MAX_RETRIES} retries — ${msg}`, "error");
+        state.mode = "idle";
+        state.lastDecision = `selection error (retries exhausted): ${msg}`;
+        persistState(pi, ctx, state);
+        updateWidget(ctx, state);
+        return;
+      }
+      ctx.ui.notify(`ultramode: selection failed — retrying (${selectionRetries}/${MAX_RETRIES}): ${msg}`, "warning");
+    }
   }
 
   // 5. Parse decision
@@ -1101,10 +1129,18 @@ async function removeWorktree(
  * watchers when session_start fires on a restart. */
 const mergeWatchers = new Map<string, ReturnType<typeof setInterval>>();
 
+/** Consecutive failure count per watcher. After MAX_MERGE_FAILURES the
+ * watcher stops and notifies the user instead of polling forever. */
+const mergeWatcherFailures = new Map<string, number>();
+
 /** Poll interval for merge detection — 60 seconds. Trades latency for API
  * rate limit friendliness. GitHub merges are human-paced (minutes to hours),
  * so 60s is more than fast enough. */
 const MERGE_POLL_MS = 60_000;
+
+/** After this many consecutive failures, stop the merge watcher and notify.
+ * At 60s intervals, 120 failures = 2 hours of continuous failure. */
+const MAX_MERGE_FAILURES = 120;
 
 /** Extract a GitHub PR URL from agent output text. */
 function extractPrUrl(text: string): string | null {
@@ -1119,13 +1155,27 @@ function parsePrUrl(url: string): { repo: string; number: number } | null {
   return { repo: match[1], number: parseInt(match[2], 10) };
 }
 
+/** Increment the failure counter. After MAX_MERGE_FAILURES, stop and notify. */
+function bumpWatcherFailure(
+  ctx: ExtensionContext,
+  sessionId: string,
+  prNumber: number,
+  reason: string
+): void {
+  const count = (mergeWatcherFailures.get(sessionId) ?? 0) + 1;
+  mergeWatcherFailures.set(sessionId, count);
+  if (count >= MAX_MERGE_FAILURES) {
+    stopMergeWatcher(sessionId);
+    ctx.ui.notify(
+      `ultramode: merge watcher for PR #${prNumber} failed ${count} times (${reason}) — stopping. Run /ultramode continue to retry.`,
+      "warning"
+    );
+  }
+}
+
 /**
  * Start polling GitHub for PR merge status. When the PR is merged,
  * auto-continue: clean up worktree, select next bead.
- *
- * Uses `gh pr view` for merge detection — same tool the human uses.
- * The poll runs on a setInterval, so it survives until the PR is merged
- * or mode is turned off.
  */
 function startMergeWatcher(
   pi: ExtensionAPI,
@@ -1133,11 +1183,9 @@ function startMergeWatcher(
   state: UltramodeState
 ): void {
   const sessionId = ctx.sessionManager.getSessionId?.() ?? "default";
-
-  // Don't start a duplicate watcher
   if (mergeWatchers.has(sessionId)) return;
 
- const prUrl = state.prUrl;
+  const prUrl = state.prUrl;
   if (!prUrl) return;
 
   const parsed = parsePrUrl(prUrl);
@@ -1147,9 +1195,9 @@ function startMergeWatcher(
     `ultramode: watching PR #${parsed.number} for merge — will auto-continue`,
     "info"
   );
+  mergeWatcherFailures.set(sessionId, 0);
 
   const timer = setInterval(async () => {
-    // Check if mode was turned off while we were waiting
     const current = getState(ctx);
     if (current.mode === "off") {
       stopMergeWatcher(sessionId);
@@ -1162,17 +1210,33 @@ function startMergeWatcher(
         "--repo", parsed.repo,
         "--json", "state,mergedAt",
       ]);
-      if (result.code !== 0 || !result.stdout) return;
 
-      const pr = JSON.parse(result.stdout) as {
-        state: string;
-        mergedAt: string | null;
-      };
+      if (result.code !== 0 || !result.stdout) {
+        bumpWatcherFailure(ctx, sessionId, parsed.number,
+          `gh exited with code ${result.code}`);
+        return;
+      }
+
+      let pr: { state: string; mergedAt: string | null };
+      try {
+        pr = JSON.parse(result.stdout) as { state: string; mergedAt: string | null };
+      } catch {
+        bumpWatcherFailure(ctx, sessionId, parsed.number,
+          "gh returned non-JSON output");
+        return;
+      }
+
+      // PR closed without merge — stop watching, notify user
+      if (pr.state === "CLOSED" && !pr.mergedAt) {
+        stopMergeWatcher(sessionId);
+        ctx.ui.notify(
+          `ultramode: PR #${parsed.number} closed without merging — watcher stopped. Run /ultramode continue to select new work.`,
+          "warning"
+        );
+        return;
+      }
 
       if (pr.state === "MERGED" || pr.mergedAt) {
-        // Re-check mode AFTER the await — user may have run /ultramode off
-        // while we were waiting for gh to respond. This prevents the
-        // TOCTOU race where we override an explicit shutdown.
         const latest = getState(ctx);
         if (latest.mode === "off") {
           stopMergeWatcher(sessionId);
@@ -1183,7 +1247,6 @@ function startMergeWatcher(
           `ultramode: PR #${parsed.number} merged — continuing automatically`,
           "info"
         );
-        // Auto-continue: clean up worktree, select next bead
         await removeWorktree(pi, ctx, latest.worktreePath);
         latest.worktreePath = null;
         latest.prUrl = null;
@@ -1193,13 +1256,16 @@ function startMergeWatcher(
         latest.retries = 0;
         latest.lastDecision = null;
         latest.lastInjectedCommand = null;
-        latest.retryFeedback = null;
         persistState(pi, ctx, latest);
         updateWidget(ctx, latest);
         await runSelection(pi, ctx);
+      } else {
+        // PR open but not merged — gh is working, reset failure counter
+        mergeWatcherFailures.set(sessionId, 0);
       }
-    } catch {
-      // gh CLI might not be available, or network error — retry next interval
+    } catch (err) {
+      bumpWatcherFailure(ctx, sessionId, parsed.number,
+        err instanceof Error ? err.message : String(err));
     }
   }, MERGE_POLL_MS);
 
@@ -1212,6 +1278,7 @@ function stopMergeWatcher(sessionId: string): void {
   if (timer) {
     clearInterval(timer);
     mergeWatchers.delete(sessionId);
+    mergeWatcherFailures.delete(sessionId);
   }
 }
 
@@ -1273,17 +1340,39 @@ export async function handleTurnEnd(
     artifact_status: formatVerificationEvidence(evidence),
   });
 
-  // Call LLM
+  // Call LLM — retry transient failures up to MAX_RETRIES before idling.
+  // A single network blip or rate limit should not permanently stop the loop.
   let decisionText: string;
   try {
     decisionText = await decide(ctx, prompt);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    ctx.ui.notify(`ultramode: decision failed — ${msg}`, "error");
-    state.mode = "idle";
-    state.lastDecision = `decision error: ${msg}`;
-    persistState(pi, ctx, state);
-    updateWidget(ctx, state);
+    if (state.retries < MAX_RETRIES) {
+      state.retries++;
+      state.lastDecision = `decision error (retry ${state.retries}/${MAX_RETRIES}): ${msg}`;
+      ctx.ui.notify(`ultramode: decision failed — retrying (${state.retries}/${MAX_RETRIES}): ${msg}`, "warning");
+      // Re-inject the current phase command for another attempt
+      const retryCmd = COMMAND_FROM_PHASE[state.phase];
+      if (retryCmd && state.beadId) {
+        persistState(pi, ctx, state);
+        updateWidget(ctx, state);
+        injectCommand(pi, ctx, state, `${retryCmd} ${state.beadId}`);
+      } else {
+        // Can't re-inject — reset to selection
+        state.beadId = null;
+        state.phase = "selecting";
+        state.retries = 0;
+        persistState(pi, ctx, state);
+        updateWidget(ctx, state);
+        await runSelection(pi, ctx);
+      }
+    } else {
+      ctx.ui.notify(`ultramode: decision failed after ${MAX_RETRIES} retries — idling: ${msg}`, "error");
+      state.mode = "idle";
+      state.lastDecision = `decision error (retries exhausted): ${msg}`;
+      persistState(pi, ctx, state);
+      updateWidget(ctx, state);
+    }
     return;
   }
 
@@ -1372,7 +1461,6 @@ export async function handleTurnEnd(
     }
     state.retries = 0;
     state.retryFeedback = null;
-    persistState(pi, ctx, state);
     updateWidget(ctx, state);
 
     // Use the beadId from state if the command doesn't include one,
@@ -1390,11 +1478,7 @@ export async function handleTurnEnd(
   } else if (decision.action === "retry") {
     if (state.retries < MAX_RETRIES) {
       state.retries++;
-      // Store the LLM's reasoning as feedback for the next attempt.
-      // This gets injected into the next command so the agent knows
-      // WHAT to fix, not just "try again".
       state.retryFeedback = decision.reasoning;
-      persistState(pi, ctx, state);
       updateWidget(ctx, state);
       ctx.ui.notify(
         `ultramode: retry ${state.retries}/${MAX_RETRIES} — ${decision.reasoning}`,
@@ -1445,8 +1529,11 @@ export async function handleTurnEnd(
     updateWidget(ctx, state);
     await runSelection(pi, ctx);
   } else if (decision.action === "stop") {
+    // Set mode=idle BEFORE any async work to prevent re-entrancy.
+    // During await removeWorktree, another turn_end must not re-enter.
+    state.mode = "idle";
+    state.retryFeedback = null;
     if (state.phase === "pr") {
-      // Extract PR URL from the agent's output
       const prUrl = extractPrUrl(lastOutput);
       if (prUrl) {
         state.prUrl = prUrl;
@@ -1460,21 +1547,16 @@ export async function handleTurnEnd(
           "info"
         );
       }
-      // Do NOT remove worktree — the PR branch lives there until merged.
     } else {
       ctx.ui.notify(
         `ultramode: stopping — ${decision.reasoning}`,
         "info"
       );
-      // Stopped before reaching /pr — no PR to merge, safe to clean up.
       await removeWorktree(pi, ctx, state.worktreePath);
       state.worktreePath = null;
     }
-    state.mode = "idle";
-    state.retryFeedback = null;
     persistState(pi, ctx, state);
     updateWidget(ctx, state);
-    // Start merge watcher if we have a PR URL
     if (state.prUrl) {
       startMergeWatcher(pi, ctx, state);
     }
@@ -1568,16 +1650,20 @@ export default function ultramode(pi: ExtensionAPI): void {
         return;
       }
 
-      try {
-        await handleTurnEnd(pi, ctx, event.message);
-      } catch (err) {
+      // Fire-and-forget: OMP awaits turn_end handlers, and handleTurnEnd can
+      // take 90+ seconds (bun test + bun build + LLM decision). Awaiting it
+      // blocks the agent loop — the terminal freezes and can't render or
+      // process input. The turnEndInProgress guard prevents overlap, and
+      // injectCommand uses followUp delivery which queues correctly.
+      void handleTurnEnd(pi, ctx, event.message).catch((err) => {
         const msg = err instanceof Error ? err.message : String(err);
         ctx.ui.notify(`ultramode: turn_end error — ${msg}`, "error");
-        state.mode = "idle";
-        state.lastDecision = `turn_end error: ${msg}`;
-        persistState(pi, ctx, state);
-        updateWidget(ctx, state);
-      }
+        const errState = getState(ctx);
+        errState.mode = "idle";
+        errState.lastDecision = `turn_end error: ${msg}`;
+        persistState(pi, ctx, errState);
+        updateWidget(ctx, errState);
+      });
     }
   );
 
@@ -1634,6 +1720,14 @@ export default function ultramode(pi: ExtensionAPI): void {
       switch (subcommand) {
         case "on": {
           state.mode = "on";
+          // Validate state consistency: if beadId is set but worktreePath
+          // is null, the prior run failed mid-create. Reset to selecting
+          // so runSelection picks a fresh bead with proper isolation.
+          if (state.beadId && !state.worktreePath) {
+            state.beadId = null;
+            state.phase = "selecting";
+            state.retries = 0;
+          }
           if (!state.beadId) {
             state.phase = "selecting";
             state.retries = 0;
@@ -1651,6 +1745,15 @@ export default function ultramode(pi: ExtensionAPI): void {
           stopMergeWatcher(
             ctx.sessionManager.getSessionId?.() ?? "default"
           );
+          // Clean up worktree — same as /continue. Without this,
+          // off leaks the worktree directory and branch on disk, and
+          // the stale prUrl causes the watcher to auto-resume on restart.
+          await removeWorktree(pi, ctx, state.worktreePath);
+          state.worktreePath = null;
+          state.prUrl = null;
+          state.beadId = null;
+          state.lastInjectedCommand = null;
+          state.retryFeedback = null;
           persistState(pi, ctx, state);
           updateWidget(ctx, state);
           ctx.ui.notify("ultramode: autonomous loop deactivated", "info");
@@ -1665,7 +1768,6 @@ export default function ultramode(pi: ExtensionAPI): void {
             `  pr: ${state.prUrl ?? "none"}`,
             `  retries: ${state.retries}/${MAX_RETRIES}`,
             `  last decision: ${state.lastDecision ?? "none"}`,
-            `  worktree: ${state.worktreePath ?? "none"}`,
           ];
           ctx.ui.notify(lines.join("\n"), "info");
           break;

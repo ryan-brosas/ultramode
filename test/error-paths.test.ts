@@ -162,6 +162,14 @@ describe("hasPendingMessages re-entrancy guard", () => {
     expect(handler).toBeDefined();
     await handler?.({ message: { content: "should proceed" } }, ctx);
 
+    // handleTurnEnd is fire-and-forget (to avoid blocking OMP's agent loop),
+    // so we need to wait for the background promise to settle before checking
+    // state. Poll until mode transitions to "idle" (the stop decision's effect).
+    for (let i = 0; i < 100; i++) {
+      if (getState(ctx).mode === "idle") break;
+      await new Promise((r) => setTimeout(r, 10));
+    }
+
     // handleTurnEnd should have run: at least one exec call for bv triage.
     const execCalls = (pi as unknown as MockExtensionAPI).exec.calls;
     expect(execCalls.length).toBeGreaterThanOrEqual(1);
