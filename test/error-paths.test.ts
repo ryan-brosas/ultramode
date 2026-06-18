@@ -332,3 +332,104 @@ describe("context helpers", () => {
     expect(result.startsWith("this is a ")).toBe(true);
   });
 });
+
+// ─── Risk 5: decide() timeout — hung LLM recovery ──────────────────────────
+// The decide() function must not hang longer than the configured timeout.
+// When complete()/completeSimple() never resolves, decide() must reject
+// with a "timed out" error. Caller error handlers (runSelection at
+// index.ts:459-468, handleTurnEnd at index.ts:623-632) catch this error
+// and idle the loop — verified by code inspection, not by this test block.
+
+describe("decide timeout", () => {
+  test("rejects with timeout error when complete never resolves", async () => {
+    installPiAiMock({
+      complete: () => new Promise<never>(() => {}),
+    });
+    const { decide } = await importIndex("timeout-never-resolves");
+    const ctx = mockExtensionContext();
+    await expect(decide(ctx, "prompt", 50)).rejects.toThrow("timed out");
+  });
+
+  test("passes AbortSignal to complete() and asserts timeout rejection", async () => {
+    const calls: { signal?: AbortSignal; abortedAtCallTime?: boolean }[] = [];
+    installPiAiMock({
+      complete: async (_m: unknown, _c: unknown, opts?: { signal?: AbortSignal }) => {
+        calls.push({ signal: opts?.signal, abortedAtCallTime: opts?.signal?.aborted ?? false });
+        return new Promise<never>(() => {});
+      },
+    });
+    const { decide } = await importIndex("timeout-signal-passed");
+    const ctx = mockExtensionContext();
+    // Assert BOTH the rejection and the signal capture — no floating promise
+    await expect(decide(ctx, "prompt", 50)).rejects.toThrow("timed out");
+    expect(calls).toHaveLength(1);
+    expect(calls[0].signal).toBeInstanceOf(AbortSignal);
+    expect(calls[0].abortedAtCallTime).toBe(false);
+  });
+
+  test("returns extracted text on fast LLM completion (Promise.race fast path)", async () => {
+    installPiAiMock({
+      complete: async () => ({
+        content: [{ type: "text" as const, text: "fast decision response" }],
+      }),
+    });
+    const { decide } = await importIndex("timeout-fast-success");
+    const ctx = mockExtensionContext();
+    const result = await decide(ctx, "prompt", 5000);
+    expect(result).toBe("fast decision response");
+  });
+
+  test("completeSimple fallback receives the signal", async () => {
+    const simpleCalls: { signal?: AbortSignal }[] = [];
+    installPiAiMock({
+      complete: async () => { throw new Error("stream failed"); },
+      completeSimple: async (_m: unknown, _c: unknown, opts?: { signal?: AbortSignal }) => {
+        simpleCalls.push(opts ?? {});
+        return { content: [{ type: "text", text: "fallback" }] };
+      },
+    });
+    const { decide } = await importIndex("timeout-fallback-signal");
+    const ctx = mockExtensionContext();
+    const result = await decide(ctx, "prompt", 5000);
+    expect(result).toBe("fallback");
+    expect(simpleCalls[0].signal).toBeInstanceOf(AbortSignal);
+    expect(simpleCalls[0].signal!.aborted).toBe(false);
+  });
+
+  test("timeout during completeSimple fallback also rejects", async () => {
+    installPiAiMock({
+      complete: async () => { throw new Error("stream failed"); },
+      completeSimple: () => new Promise<never>(() => {}),
+    });
+    const { decide } = await importIndex("timeout-fallback-also");
+    const ctx = mockExtensionContext();
+    await expect(decide(ctx, "prompt", 50)).rejects.toThrow("timed out");
+  });
+
+  test("no-model error still throws (regression)", async () => {
+    installPiAiMock();
+    const { decide } = await importIndex("timeout-regression-model");
+    const ctx = mockExtensionContext({ model: undefined });
+    await expect(decide(ctx, "prompt", 5000)).rejects.toThrow("no active model");
+  });
+
+  test("no-api-key error still throws (regression)", async () => {
+    installPiAiMock();
+    const { decide } = await importIndex("timeout-regression-key");
+    const ctx = mockExtensionContext({ getApiKeyResult: undefined });
+    await expect(decide(ctx, "prompt", 5000)).rejects.toThrow("no API key");
+  });
+  test("rejects invalid timeoutMs values (Infinity, 0, negative, NaN)", async () => {
+    installPiAiMock();
+    const { decide } = await importIndex("timeout-validation");
+    const ctx = mockExtensionContext();
+    await expect(decide(ctx, "prompt", Infinity)).rejects.toThrow("invalid timeoutMs");
+    await expect(decide(ctx, "prompt", 0)).rejects.toThrow("invalid timeoutMs");
+    await expect(decide(ctx, "prompt", -1)).rejects.toThrow("invalid timeoutMs");
+    await expect(decide(ctx, "prompt", NaN)).rejects.toThrow("invalid timeoutMs");
+  });
+  test("DECISION_TIMEOUT_MS is exported and equals 120000", async () => {
+    const { DECISION_TIMEOUT_MS } = await importIndex("timeout-constant-value");
+    expect(DECISION_TIMEOUT_MS).toBe(120000);
+  });
+});
