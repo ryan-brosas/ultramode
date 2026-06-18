@@ -151,6 +151,11 @@ export function createState(): UltramodeState {
 // don't collide.
 const sessionStates = new Map<string, UltramodeState>();
 
+/** Tracks sessions where runSelection is in progress. Prevents re-entrancy
+ * — if session_start's fire-and-forget runSelection is still running when
+ * /ultramode on fires, the second call skips. */
+const selectionInProgress = new Set<string>();
+
 export function getState(ctx: ExtensionContext): UltramodeState {
   const key = ctx.sessionManager.getSessionId();
   let state = sessionStates.get(key);
@@ -693,6 +698,14 @@ export async function runSelection(
 ): Promise<void> {
   const state = getState(ctx);
 
+  // Re-entrancy guard: prevent concurrent runSelection calls from
+  // claiming the same bead or injecting duplicate commands.
+  if (selectionInProgress.has(ctx.sessionManager.getSessionId())) {
+    return;
+  }
+  selectionInProgress.add(ctx.sessionManager.getSessionId());
+  try {
+
   // Fast path: if a description was provided (/ultramode on "fix the bug in..."),
   // skip triage/scheduler/LLM and go straight to /create.
   if (description) {
@@ -763,7 +776,18 @@ export async function runSelection(
   }
 
   // 3. Build selection prompt
-  const template = loadPrompt("selection-prompt");
+  let template: string;
+  try {
+    template = loadPrompt("selection-prompt");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    ctx.ui.notify(`ultramode: failed to load selection prompt — ${msg}`, "error");
+    state.mode = "idle";
+    state.lastDecision = `prompt load error: ${msg}`;
+    persistState(pi, ctx, state);
+    updateWidget(ctx, state);
+    return;
+  }
   const prompt = fillTemplate(template, {
     bv_triage_json: triageJson,
     br_scheduler_json: schedulerJson,
@@ -873,6 +897,9 @@ export async function runSelection(
     state.mode = "idle";
     persistState(pi, ctx, state);
     updateWidget(ctx, state);
+  }
+  } finally {
+    selectionInProgress.delete(ctx.sessionManager.getSessionId());
   }
 }
 
