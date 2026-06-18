@@ -46,6 +46,10 @@ export interface UltramodeState {
    * agent knows what to fix — "PRD is missing Out of Scope section" —
    * instead of blindly re-running the phase. */
   retryFeedback: string | null;
+  /** PR URL extracted from /pr output. When set and mode=idle+phase=pr,
+   * the merge watcher polls GitHub for merge status and auto-continues
+   * when the PR is merged. */
+  prUrl: string | null;
 }
 
 export interface SelectionDecision {
@@ -133,6 +137,7 @@ export function createState(): UltramodeState {
     worktreePath: null,
     lastInjectedCommand: null,
     retryFeedback: null,
+    prUrl: null,
   };
 }
 
@@ -214,6 +219,10 @@ export function reconstructState(ctx: ExtensionContext): UltramodeState {
       retryFeedback:
         typeof candidate.retryFeedback === "string"
           ? candidate.retryFeedback
+          : null,
+      prUrl:
+        typeof candidate.prUrl === "string"
+          ? candidate.prUrl
           : null,
     };
   }
@@ -940,6 +949,118 @@ async function removeWorktree(
   }
 }
 
+// ─── Merge Watcher ─────────────────────────────────────────────────────────────
+
+/** Active merge watcher timers, keyed by session ID. Prevents duplicate
+ * watchers when session_start fires on a restart. */
+const mergeWatchers = new Map<string, ReturnType<typeof setInterval>>();
+
+/** Poll interval for merge detection — 60 seconds. Trades latency for API
+ * rate limit friendliness. GitHub merges are human-paced (minutes to hours),
+ * so 60s is more than fast enough. */
+const MERGE_POLL_MS = 60_000;
+
+/** Extract a GitHub PR URL from agent output text. */
+function extractPrUrl(text: string): string | null {
+  const match = text.match(/https:\/\/github\.com\/[^\s)]+\/pull\/\d+/);
+  return match ? match[0] : null;
+}
+
+/** Parse owner/repo/number from a GitHub PR URL. */
+function parsePrUrl(url: string): { repo: string; number: number } | null {
+  const match = url.match(/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/);
+  if (!match) return null;
+  return { repo: match[1], number: parseInt(match[2], 10) };
+}
+
+/**
+ * Start polling GitHub for PR merge status. When the PR is merged,
+ * auto-continue: clean up worktree, select next bead.
+ *
+ * Uses `gh pr view` for merge detection — same tool the human uses.
+ * The poll runs on a setInterval, so it survives until the PR is merged
+ * or mode is turned off.
+ */
+function startMergeWatcher(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  state: UltramodeState
+): void {
+  const sessionId = ctx.sessionManager.getSessionId?.() ?? "default";
+
+  // Don't start a duplicate watcher
+  if (mergeWatchers.has(sessionId)) return;
+
+ const prUrl = state.prUrl;
+  if (!prUrl) return;
+
+  const parsed = parsePrUrl(prUrl);
+  if (!parsed) return;
+
+  ctx.ui.notify(
+    `ultramode: watching PR #${parsed.number} for merge — will auto-continue`,
+    "info"
+  );
+
+  const timer = setInterval(async () => {
+    // Check if mode was turned off while we were waiting
+    const current = getState(ctx);
+    if (current.mode === "off") {
+      stopMergeWatcher(sessionId);
+      return;
+    }
+
+    try {
+      const result = await pi.exec("gh", [
+        "pr", "view", String(parsed.number),
+        "--repo", parsed.repo,
+        "--json", "state,mergedAt",
+      ]);
+      if (result.code !== 0 || !result.stdout) return;
+
+      const pr = JSON.parse(result.stdout) as {
+        state: string;
+        mergedAt: string | null;
+      };
+
+      if (pr.state === "MERGED" || pr.mergedAt) {
+        stopMergeWatcher(sessionId);
+        ctx.ui.notify(
+          `ultramode: PR #${parsed.number} merged — continuing automatically`,
+          "info"
+        );
+        // Auto-continue: clean up worktree, select next bead
+        await removeWorktree(pi, ctx, current.worktreePath);
+        current.worktreePath = null;
+        current.prUrl = null;
+        current.mode = "on";
+        current.beadId = null;
+        current.phase = "selecting";
+        current.retries = 0;
+        current.lastDecision = null;
+        current.lastInjectedCommand = null;
+        current.retryFeedback = null;
+        persistState(pi, ctx, current);
+        updateWidget(ctx, current);
+        await runSelection(pi, ctx);
+      }
+    } catch {
+      // gh CLI might not be available, or network error — retry next interval
+    }
+  }, MERGE_POLL_MS);
+
+  mergeWatchers.set(sessionId, timer);
+}
+
+/** Stop the merge watcher for a session. */
+function stopMergeWatcher(sessionId: string): void {
+  const timer = mergeWatchers.get(sessionId);
+  if (timer) {
+    clearInterval(timer);
+    mergeWatchers.delete(sessionId);
+  }
+}
+
 export async function handleTurnEnd(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
@@ -1156,12 +1277,21 @@ export async function handleTurnEnd(
     await runSelection(pi, ctx);
   } else if (decision.action === "stop") {
     if (state.phase === "pr") {
-      ctx.ui.notify(
-        "ultramode: PR created — worktree preserved for merge. Run /ultramode continue after merge.",
-        "info"
-      );
+      // Extract PR URL from the agent's output
+      const prUrl = extractPrUrl(lastOutput);
+      if (prUrl) {
+        state.prUrl = prUrl;
+        ctx.ui.notify(
+          `ultramode: PR created — ${prUrl}. Auto-continuing on merge.`,
+          "info"
+        );
+      } else {
+        ctx.ui.notify(
+          "ultramode: PR created — worktree preserved for merge. Run /ultramode continue after merge.",
+          "info"
+        );
+      }
       // Do NOT remove worktree — the PR branch lives there until merged.
-      // /ultramode continue cleans it up after the human merges.
     } else {
       ctx.ui.notify(
         `ultramode: stopping — ${decision.reasoning}`,
@@ -1175,6 +1305,10 @@ export async function handleTurnEnd(
     state.retryFeedback = null;
     persistState(pi, ctx, state);
     updateWidget(ctx, state);
+    // Start merge watcher if we have a PR URL
+    if (state.prUrl) {
+      startMergeWatcher(pi, ctx, state);
+    }
   }
 }
 
@@ -1187,6 +1321,17 @@ export default function ultramode(pi: ExtensionAPI): void {
     sessionStates.set(ctx.sessionManager.getSessionId(), state);
     updateWidget(ctx, state);
     ctx.ui.notify("ultramode loaded", "info");
+
+    // Restart merge watcher if we were waiting for a PR merge when the
+    // session was restarted. The watcher is in-memory only (setInterval),
+    // so it doesn't survive restarts — we need to manually re-arm it.
+    if (state.mode === "idle" && state.phase === "pr" && state.prUrl) {
+      startMergeWatcher(pi, ctx, state);
+      ctx.ui.notify(
+        "ultramode: resumed merge watcher for PR — will auto-continue on merge",
+        "info"
+      );
+    }
 
     if (state.mode === "on") {
       // Fire-and-forget — don't block session start
@@ -1308,6 +1453,9 @@ export default function ultramode(pi: ExtensionAPI): void {
         }
         case "off": {
           state.mode = "off";
+          stopMergeWatcher(
+            ctx.sessionManager.getSessionId?.() ?? "default"
+          );
           persistState(pi, ctx, state);
           updateWidget(ctx, state);
           ctx.ui.notify("ultramode: autonomous loop deactivated", "info");
@@ -1318,7 +1466,8 @@ export default function ultramode(pi: ExtensionAPI): void {
             `ultramode status:`,
             `  mode: ${state.mode}`,
             `  bead: ${state.beadId ?? "none"}`,
-            `  phase: ${state.phase}`,
+            `  worktree: ${state.worktreePath ?? "none"}`,
+            `  pr: ${state.prUrl ?? "none"}`,
             `  retries: ${state.retries}/${MAX_RETRIES}`,
             `  last decision: ${state.lastDecision ?? "none"}`,
             `  worktree: ${state.worktreePath ?? "none"}`,
@@ -1329,8 +1478,12 @@ export default function ultramode(pi: ExtensionAPI): void {
         case "continue": {
           // Clean up the previous bead's worktree — the user ran this
           // because they merged the PR, so the branch is now merged.
+          stopMergeWatcher(
+            ctx.sessionManager.getSessionId?.() ?? "default"
+          );
           await removeWorktree(pi, ctx, state.worktreePath);
           state.worktreePath = null;
+          state.prUrl = null;
           state.mode = "on";
           state.beadId = null;
           state.phase = "selecting";
