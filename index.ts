@@ -128,7 +128,7 @@ export function createState(): UltramodeState {
 // don't collide.
 const sessionStates = new Map<string, UltramodeState>();
 
-function getState(ctx: ExtensionContext): UltramodeState {
+export function getState(ctx: ExtensionContext): UltramodeState {
   const key = ctx.sessionManager.getSessionId();
   let state = sessionStates.get(key);
   if (!state) {
@@ -367,7 +367,7 @@ export async function decide(
 
 // ─── Work Selection ───────────────────────────────────────────────────────────
 
-async function runSelection(
+export async function runSelection(
   pi: ExtensionAPI,
   ctx: ExtensionContext
 ): Promise<void> {
@@ -554,7 +554,7 @@ async function markBlocked(
   );
 }
 
-async function handleTurnEnd(
+export async function handleTurnEnd(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

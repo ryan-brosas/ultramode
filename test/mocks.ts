@@ -85,11 +85,28 @@ export interface MockAPIOverrides {
   execResults?: Array<{ stdout: string; code: number }>;
 }
 
-export function mockExtensionAPI(overrides: MockAPIOverrides = {}): ExtensionAPI {
+export interface MockExtensionAPI {
+  exec: Spy<[string, string[]], Promise<{ stdout: string; code: number }>>;
+  sendUserMessage: Spy<[string, { deliverAs: "followUp" }], void>;
+  appendEntry: Spy<[string, unknown], void>;
+  registerCommand: Spy<
+    [
+      string,
+      { handler: (args: string, ctx: ExtensionCommandContext) => MaybePromise<void> }
+    ],
+    void
+  >;
+  on: Spy<[string, (...args: readonly unknown[]) => MaybePromise<unknown>], void>;
+  onHandlers: Map<string, (...args: readonly unknown[]) => MaybePromise<unknown>>;
+}
+
+export function mockExtensionAPI(overrides: MockAPIOverrides = {}): MockExtensionAPI {
   let execCallIndex = 0;
-  const api = {
+  const onHandlers = new Map<string, (...args: readonly unknown[]) => MaybePromise<unknown>>();
+  const api: MockExtensionAPI = {
     exec: createSpy<[string, string[]], Promise<{ stdout: string; code: number }>>(
-      async () => {
+      async (_cmd: string, args: string[]) => {
+        void args;
         if (overrides.execResults && overrides.execResults.length > 0) {
           const result = overrides.execResults[
             Math.min(execCallIndex, overrides.execResults.length - 1)
@@ -104,16 +121,22 @@ export function mockExtensionAPI(overrides: MockAPIOverrides = {}): ExtensionAPI
       () => undefined
     ),
     appendEntry: createSpy<[string, unknown], void>(() => undefined),
-    registerCommand: createSpy<[
-      string,
-      { handler: (args: string, ctx: ExtensionCommandContext) => MaybePromise<void> }
-    ], void>(() => undefined),
+    registerCommand: createSpy<
+      [
+        string,
+        { handler: (args: string, ctx: ExtensionCommandContext) => MaybePromise<void> }
+      ],
+      void
+    >(() => undefined),
     on: createSpy<[string, (...args: readonly unknown[]) => MaybePromise<unknown>], void>(
-      () => undefined
+      (event: string, handler: (...args: readonly unknown[]) => MaybePromise<unknown>) => {
+        onHandlers.set(event, handler);
+      }
     ),
+    onHandlers,
   };
   // Test boundary: the mock implements only members used by the extension tests.
-  return api as unknown as ExtensionAPI;
+  return api as unknown as MockExtensionAPI;
 }
 
 interface PiAiMockOverrides {
