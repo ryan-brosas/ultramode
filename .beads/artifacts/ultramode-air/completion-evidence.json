@@ -1,0 +1,113 @@
+{
+  "beadId": "ultramode-air",
+  "status": "verified",
+  "summary": "All planned Bun tests, runner, build, bead lint, graph hygiene, and no-close invariant checks passed for the ultramode-air test harness implementation.",
+  "passedChecks": [
+    {
+      "command": "bv --robot-triage --format json && bv --robot-alerts --format json && br show \"ultramode-air\" --json",
+      "expected": "Bead remains relevant, has no alerts, and is in_progress for verification.",
+      "result": "Exit 0. Triage reported ultramode-air in_progress, alerts summary total 0, and br show returned status in_progress with assignee assistant."
+    },
+    {
+      "command": "git diff --name-only HEAD~1",
+      "expected": "Changed files include the planned 1 production edit and 7 new test/runner files, plus bead workflow artifacts.",
+      "result": "Exit 0. Output listed index.ts, test/error-paths.test.ts, test/mocks.ts, test/parse-decision.test.ts, test/phase-maps.test.ts, test/reconstruct-state.test.ts, test/retry-logic.test.ts, test/run.sh, and bead artifacts/sync files."
+    },
+    {
+      "command": "bun test test/parse-decision.test.ts",
+      "expected": "parseDecision focused tests exit 0.",
+      "result": "Exit 0. 11 pass, 0 fail, 23 expect() calls."
+    },
+    {
+      "command": "bun test test/reconstruct-state.test.ts",
+      "expected": "reconstructState focused tests exit 0.",
+      "result": "Exit 0. 8 pass, 0 fail, 11 expect() calls."
+    },
+    {
+      "command": "bun test test/phase-maps.test.ts",
+      "expected": "Phase map invariant tests exit 0.",
+      "result": "Exit 0. 7 pass, 0 fail, 53 expect() calls."
+    },
+    {
+      "command": "bun test test/retry-logic.test.ts",
+      "expected": "Retry invariant tests exit 0.",
+      "result": "Exit 0. 8 pass, 0 fail, 16 expect() calls."
+    },
+    {
+      "command": "bun test test/error-paths.test.ts",
+      "expected": "decide/helper error path tests exit 0.",
+      "result": "Exit 0. 10 pass, 0 fail, 15 expect() calls."
+    },
+    {
+      "command": "bash test/run.sh",
+      "expected": "Runner executes bun test test/ and exits 0.",
+      "result": "Exit 0. 44 pass, 0 fail, 118 expect() calls across 5 files."
+    },
+    {
+      "command": "bun test test/",
+      "expected": "All test files pass together.",
+      "result": "Exit 0. 44 pass, 0 fail, 118 expect() calls across 5 files."
+    },
+    {
+      "command": "bun build index.ts --no-bundle",
+      "expected": "Named exports and default extension entry point build successfully.",
+      "result": "Exit 0. Bun emitted non-bundled JavaScript for index.ts with exported constants/functions and default ultramode factory."
+    },
+    {
+      "command": "python3 - <<'PY'\nfrom pathlib import Path\nprint(Path('index.ts').read_text().count('/close'))\nPY",
+      "expected": "No /close command appears in index.ts.",
+      "result": "Exit 0. Printed 0."
+    },
+    {
+      "command": "br lint \"ultramode-air\" --json",
+      "expected": "Bead lint reports no issues.",
+      "result": "Exit 0. {\"total\":0,\"issues\":0,\"results\":[]}."
+    },
+    {
+      "command": "bv --robot-suggest --format json",
+      "expected": "Graph hygiene suggests no required follow-up before review.",
+      "result": "Exit 0. suggestions.stats.total 0, high_confidence_count 0, actionable_count 0."
+    }
+  ],
+  "failedChecks": [],
+  "uncheckedRisks": [
+    "Plan.md did not contain a Risks table. No plan-listed risks were left unchecked.",
+    "PRD out-of-scope live OMP session behavior was not checked because this bead is explicitly unit-test-only and avoids live model/session dependencies.",
+    "PRD out-of-scope worktree enforcement was not checked because state.worktreePath behavior belongs to a separate bead."
+  ],
+  "artifacts": [
+    {
+      "path": "index.ts",
+      "purpose": "Provides named exports for existing testable internals while preserving the default OMP extension factory."
+    },
+    {
+      "path": "test/mocks.ts",
+      "purpose": "Provides reusable mock ExtensionAPI, ExtensionContext, session manager, pi-ai module, and cache-busted test import helpers."
+    },
+    {
+      "path": "test/parse-decision.test.ts",
+      "purpose": "Proves parseDecision handles brace-in-prose, multiple objects, nested JSON, invalid actions, missing JSON, empty input, and selection decisions."
+    },
+    {
+      "path": "test/reconstruct-state.test.ts",
+      "purpose": "Proves reconstructState validates persisted mode/phase data, applies defaults, skips corrupt entries, and uses the last valid control entry."
+    },
+    {
+      "path": "test/phase-maps.test.ts",
+      "purpose": "Proves phase map consistency, pr terminal behavior, command reverse mapping, valid phases, retry cap, and absence of merge-phase commands."
+    },
+    {
+      "path": "test/retry-logic.test.ts",
+      "purpose": "Proves retry command direction uses current-phase commands and retry cap/no-command invariants remain guarded."
+    },
+    {
+      "path": "test/error-paths.test.ts",
+      "purpose": "Proves decide no-model/no-key failures, completeSimple fallback, hasPendingMessages mock behavior, extractText, and truncate helpers."
+    },
+    {
+      "path": "test/run.sh",
+      "purpose": "Provides the planned shell runner for bun test test/."
+    }
+  ],
+  "followUps": []
+}

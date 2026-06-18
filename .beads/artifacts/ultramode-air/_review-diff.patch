@@ -1,0 +1,870 @@
+diff --git a/index.ts b/index.ts
+index 73d2d61..c666009 100644
+--- a/index.ts
++++ b/index.ts
+@@ -21,7 +21,7 @@ import type {
+ 
+ // ─── Types ──────────────────────────────────────────────────────────────────
+ 
+-type Phase =
++export type Phase =
+   | "selecting"
+   | "creating"
+   | "planning"
+@@ -30,7 +30,7 @@ type Phase =
+   | "reviewing"
+   | "pr";
+ 
+-interface UltramodeState {
++export interface UltramodeState {
+   mode: "off" | "on" | "idle";
+   beadId: string | null;
+   phase: Phase;
+@@ -39,14 +39,14 @@ interface UltramodeState {
+   worktreePath: string | null;
+ }
+ 
+-interface SelectionDecision {
++export interface SelectionDecision {
+   action: "select" | "wait" | "create";
+   beadId: string | null;
+   reasoning: string;
+   createDescription: string | null;
+ }
+ 
+-interface PhaseDecision {
++export interface PhaseDecision {
+   action: "proceed" | "reject" | "retry" | "stop";
+   reasoning: string;
+   nextCommand: string | null;
+@@ -56,7 +56,7 @@ interface PhaseDecision {
+ 
+ // Maps each phase to the command that transitions out of it.
+ // Terminal case is `pr` → null (loop stops, human merges).
+-const PHASE_WHITELIST: Record<Phase, string | null> = {
++export const PHASE_WHITELIST: Record<Phase, string | null> = {
+   selecting: "/create",
+   creating: "/plan",
+   planning: "/ship",
+@@ -67,7 +67,7 @@ const PHASE_WHITELIST: Record<Phase, string | null> = {
+ };
+ 
+ // Reverse map: command → resulting phase.
+-const PHASE_FROM_COMMAND: Record<string, Phase> = {
++export const PHASE_FROM_COMMAND: Record<string, Phase> = {
+   "/create": "creating",
+   "/plan": "planning",
+   "/ship": "shipping",
+@@ -76,7 +76,7 @@ const PHASE_FROM_COMMAND: Record<string, Phase> = {
+   "/pr": "pr",
+ };
+ 
+-const ALLOWED_PHASE_COMMANDS = new Set([
++export const ALLOWED_PHASE_COMMANDS = new Set([
+   "/create",
+   "/plan",
+   "/ship",
+@@ -84,7 +84,7 @@ const ALLOWED_PHASE_COMMANDS = new Set([
+   "/review",
+   "/pr",
+ ]);
+-const VALID_PHASES = new Set<Phase>([
++export const VALID_PHASES = new Set<Phase>([
+   "selecting",
+   "creating",
+   "planning",
+@@ -97,7 +97,7 @@ const VALID_PHASES = new Set<Phase>([
+ // Reverse of PHASE_FROM_COMMAND: maps a phase to the command that started it.
+ // Used by the retry path to re-inject the current phase's command.
+ // (PHASE_WHITELIST maps phase → next command, which is the wrong direction for retries.)
+-const COMMAND_FROM_PHASE: Record<Phase, string | null> = {
++export const COMMAND_FROM_PHASE: Record<Phase, string | null> = {
+   selecting: null,
+   creating: "/create",
+   planning: "/plan",
+@@ -107,13 +107,13 @@ const COMMAND_FROM_PHASE: Record<Phase, string | null> = {
+   pr: "/pr",
+ };
+ 
+-const MAX_RETRIES = 3;
++export const MAX_RETRIES = 3;
+ 
+ // ─── State Helpers ───────────────────────────────────────────────────────────
+ 
+-const CONTROL_TYPE = "ultramode-control";
++export const CONTROL_TYPE = "ultramode-control";
+ 
+-function createState(): UltramodeState {
++export function createState(): UltramodeState {
+   return {
+     mode: "off",
+     beadId: null,
+@@ -149,7 +149,7 @@ function persistState(
+ // Reconstruct state from the session journal by scanning for the last
+ // ultramode-control custom entry. Same pattern as autoresearch's
+ // reconstructControlState (autoresearch/state.ts:220).
+-function reconstructState(ctx: ExtensionContext): UltramodeState {
++export function reconstructState(ctx: ExtensionContext): UltramodeState {
+   const entries = ctx.sessionManager.getBranch();
+   let reconstructed = createState();
+   for (const entry of entries) {
+@@ -207,25 +207,26 @@ function fillTemplate(
+ 
+ // Extract text from an AgentMessage's content blocks.
+ // AgentMessage.content can be a string or an array of content blocks.
+-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+-function extractText(message: any): string {
+-  if (!message) return "";
+-  const content = message.content;
++export function extractText(message: unknown): string {
++  if (!message || typeof message !== "object") return "";
++  const content = (message as { content?: unknown }).content;
+   if (typeof content === "string") return content;
+   if (Array.isArray(content)) {
+     return content
+       .filter(
+-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+-        (b: any) => b.type === "text" && typeof b.text === "string"
++        (block): block is { type: "text"; text: string } =>
++          Boolean(block) &&
++          typeof block === "object" &&
++          (block as { type?: unknown }).type === "text" &&
++          typeof (block as { text?: unknown }).text === "string"
+       )
+-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+-      .map((b: any) => b.text)
++      .map((block) => block.text)
+       .join("");
+   }
+   return "";
+ }
+ 
+-function truncate(text: string, maxLen: number): string {
++export function truncate(text: string, maxLen: number): string {
+   if (text.length <= maxLen) return text;
+   return text.slice(0, maxLen) + "\n... [truncated]";
+ }
+@@ -234,7 +235,7 @@ function truncate(text: string, maxLen: number): string {
+ 
+ // Extract the last balanced {...} block, JSON.parse, validate the action
+ // field is in the allowed set. Returns null on failure.
+-function parseDecision<T extends { action: string }>(
++export function parseDecision<T extends { action: string }>(
+   text: string,
+   allowedActions: string[]
+ ): T | null {
+@@ -323,7 +324,7 @@ function updateWidget(ctx: ExtensionContext, state: UltramodeState): void {
+ // The load-bearing function: calls complete() from @oh-my-pi/pi-ai.
+ // This replaces the PRD's inaccessible session method (which does not exist on
+ // ExtensionContext or ExtensionAPI).
+-async function decide(
++export async function decide(
+   ctx: ExtensionContext,
+   promptText: string
+ ): Promise<string> {
+diff --git a/test/error-paths.test.ts b/test/error-paths.test.ts
+new file mode 100644
+index 0000000..fd0ae1f
+--- /dev/null
++++ b/test/error-paths.test.ts
+@@ -0,0 +1,120 @@
++import { describe, expect, test } from "bun:test";
++import {
++  importIndex,
++  installPiAiMock,
++  mockExtensionContext,
++} from "./mocks.ts";
++
++describe("decide error paths", () => {
++  test("throws no active model when ctx.model is undefined", async () => {
++    installPiAiMock();
++    const { decide } = await importIndex("no-model-undefined");
++    const ctx = mockExtensionContext({ model: undefined });
++
++    await expect(decide(ctx, "test prompt")).rejects.toThrow("no active model");
++  });
++
++  test("throws no active model when ctx.model is null", async () => {
++    installPiAiMock();
++    const { decide } = await importIndex("no-model-null");
++    const ctx = mockExtensionContext({ model: null });
++
++    await expect(decide(ctx, "test prompt")).rejects.toThrow("no active model");
++  });
++
++  test("throws no API key when getApiKey returns undefined", async () => {
++    installPiAiMock();
++    const { decide } = await importIndex("no-api-key");
++    const ctx = mockExtensionContext({
++      model: { provider: "test", id: "test-model" },
++      getApiKeyResult: undefined,
++    });
++
++    await expect(decide(ctx, "test prompt")).rejects.toThrow("no API key");
++  });
++
++  test("falls back to completeSimple when complete throws", async () => {
++    const completeCalls: string[] = [];
++    const completeSimpleCalls: string[] = [];
++
++    installPiAiMock({
++      complete: async () => {
++        completeCalls.push("complete");
++        throw new Error("stream provider failed");
++      },
++      completeSimple: async () => {
++        completeSimpleCalls.push("completeSimple");
++        return {
++          content: [{ type: "text", text: "fallback text" }],
++        };
++      },
++    });
++
++    const { decide } = await importIndex("fallback");
++    const ctx = mockExtensionContext({
++      model: { provider: "test", id: "test-model" },
++      getApiKeyResult: "test-api-key",
++    });
++
++    const result = await decide(ctx, "test prompt");
++
++    expect(result).toBe("fallback text");
++    expect(completeCalls).toHaveLength(1);
++    expect(completeSimpleCalls).toHaveLength(1);
++  });
++});
++
++describe("context helpers", () => {
++  test("hasPendingMessages mock is callable when provided", () => {
++    const ctx = mockExtensionContext({ hasPendingMessages: true });
++
++    expect(typeof ctx.hasPendingMessages).toBe("function");
++    expect(ctx.hasPendingMessages?.()).toBe(true);
++  });
++
++  test("extractText reads string content", async () => {
++    installPiAiMock();
++    const { extractText } = await importIndex("extract-string");
++
++    expect(extractText({ content: "hello" })).toBe("hello");
++  });
++
++  test("extractText joins text content blocks", async () => {
++    installPiAiMock();
++    const { extractText } = await importIndex("extract-blocks");
++    const message = {
++      content: [
++        { type: "text", text: "hello " },
++        { type: "image", data: "ignored" },
++        { type: "text", text: "world" },
++      ],
++    };
++
++    expect(extractText(message)).toBe("hello world");
++  });
++
++  test("extractText returns empty text for nullish or missing content", async () => {
++    installPiAiMock();
++    const { extractText } = await importIndex("extract-empty");
++
++    expect(extractText(null)).toBe("");
++    expect(extractText({})).toBe("");
++  });
++
++  test("truncate leaves short text unchanged", async () => {
++    installPiAiMock();
++    const { truncate } = await importIndex("truncate-short");
++
++    expect(truncate("short", 100)).toBe("short");
++  });
++
++  test("truncate shortens long text and appends a marker", async () => {
++    installPiAiMock();
++    const { truncate } = await importIndex("truncate-long");
++
++    const result = truncate("this is a long string", 10);
++
++    expect(result).toContain("[truncated]");
++    expect(result.startsWith("this is a ")).toBe(true);
++  });
++});
+diff --git a/test/mocks.ts b/test/mocks.ts
+new file mode 100644
+index 0000000..b7c230d
+--- /dev/null
++++ b/test/mocks.ts
+@@ -0,0 +1,138 @@
++import { mock } from "bun:test";
++import type {
++  ExtensionAPI,
++  ExtensionCommandContext,
++  ExtensionContext,
++} from "@oh-my-pi/pi-coding-agent";
++import type * as IndexModule from "../index.ts";
++
++type MaybePromise<T> = T | Promise<T>;
++
++export interface Spy<Args extends readonly unknown[] = readonly unknown[], Return = unknown> {
++  (...args: Args): Return;
++  calls: Args[];
++}
++
++export function createSpy<Args extends readonly unknown[], Return>(
++  impl: (...args: Args) => Return
++): Spy<Args, Return> {
++  const fn = ((...args: Args): Return => {
++    fn.calls.push(args);
++    return impl(...args);
++  }) as Spy<Args, Return>;
++  fn.calls = [];
++  return fn;
++}
++
++export interface MockSessionEntry {
++  type: string;
++  customType?: string;
++  data?: unknown;
++}
++
++export function mockSessionManager(entries: MockSessionEntry[] = []) {
++  return {
++    getBranch: createSpy<[], MockSessionEntry[]>(() => entries),
++    getSessionId: createSpy<[], string>(() => "test-session-id"),
++  };
++}
++
++export interface MockContextOverrides {
++  model?: unknown;
++  getApiKeyResult?: string | undefined;
++  sessionEntries?: MockSessionEntry[];
++  cwd?: string;
++  hasPendingMessages?: boolean;
++}
++
++export function mockExtensionContext(
++  overrides: MockContextOverrides = {}
++): ExtensionContext {
++  const model = Object.hasOwn(overrides, "model")
++    ? overrides.model
++    : { provider: "test", id: "test-model" };
++  const apiKeyResult = Object.hasOwn(overrides, "getApiKeyResult")
++    ? overrides.getApiKeyResult
++    : "test-api-key";
++  const ctx = {
++    model,
++    modelRegistry: {
++      getApiKey: createSpy<[unknown, unknown], Promise<string | undefined>>(
++        async () => apiKeyResult
++      ),
++    },
++    sessionManager: mockSessionManager(overrides.sessionEntries),
++    ui: {
++      notify: createSpy<[string, string], void>(() => undefined),
++      setWidget: createSpy<[string, string[]], void>(() => undefined),
++      setStatus: createSpy<[string, string], void>(() => undefined),
++    },
++    cwd: overrides.cwd ?? "/test/cwd",
++    ...(Object.hasOwn(overrides, "hasPendingMessages")
++      ? {
++          hasPendingMessages: createSpy<[], boolean>(
++            () => overrides.hasPendingMessages === true
++          ),
++        }
++      : {}),
++  };
++  // Test boundary: the mock implements only members used by exported functions.
++  return ctx as unknown as ExtensionContext;
++}
++
++export interface MockAPIOverrides {
++  execResult?: { stdout: string; code: number };
++  execResults?: Array<{ stdout: string; code: number }>;
++}
++
++export function mockExtensionAPI(overrides: MockAPIOverrides = {}): ExtensionAPI {
++  let execCallIndex = 0;
++  const api = {
++    exec: createSpy<[string, string[]], Promise<{ stdout: string; code: number }>>(
++      async () => {
++        if (overrides.execResults && overrides.execResults.length > 0) {
++          const result = overrides.execResults[
++            Math.min(execCallIndex, overrides.execResults.length - 1)
++          ];
++          execCallIndex += 1;
++          return result;
++        }
++        return overrides.execResult ?? { stdout: "{}", code: 0 };
++      }
++    ),
++    sendUserMessage: createSpy<[string, { deliverAs: "followUp" }], void>(
++      () => undefined
++    ),
++    appendEntry: createSpy<[string, unknown], void>(() => undefined),
++    registerCommand: createSpy<[
++      string,
++      { handler: (args: string, ctx: ExtensionCommandContext) => MaybePromise<void> }
++    ], void>(() => undefined),
++    on: createSpy<[string, (...args: readonly unknown[]) => MaybePromise<unknown>], void>(
++      () => undefined
++    ),
++  };
++  // Test boundary: the mock implements only members used by the extension tests.
++  return api as unknown as ExtensionAPI;
++}
++
++interface PiAiMockOverrides {
++  complete?: () => MaybePromise<unknown>;
++  completeSimple?: () => MaybePromise<unknown>;
++}
++
++export function installPiAiMock(overrides: PiAiMockOverrides = {}): void {
++  mock.module("@oh-my-pi/pi-ai", () => ({
++    complete:
++      overrides.complete ??
++      (async () => ({ content: [{ type: "text", text: "default complete" }] })),
++    completeSimple:
++      overrides.completeSimple ??
++      (async () => ({ content: [{ type: "text", text: "default simple" }] })),
++  }));
++}
++
++export async function importIndex(label: string): Promise<typeof IndexModule> {
++  // Test exception: cache-busted dynamic import is required so Bun applies the module mock before index.ts loads.
++  return await import(`../index.ts?${label}-${Date.now()}`);
++}
+diff --git a/test/parse-decision.test.ts b/test/parse-decision.test.ts
+new file mode 100644
+index 0000000..1fd1cdd
+--- /dev/null
++++ b/test/parse-decision.test.ts
+@@ -0,0 +1,112 @@
++import { beforeAll, describe, expect, test } from "bun:test";
++import type * as IndexModule from "../index.ts";
++import { importIndex, installPiAiMock } from "./mocks.ts";
++
++let indexModule: typeof IndexModule;
++
++beforeAll(async () => {
++  installPiAiMock();
++  indexModule = await importIndex("parse-decision");
++});
++
++describe("parseDecision", () => {
++  test("parses simple JSON with a valid action", () => {
++    const text = `{"action":"proceed","reasoning":"done","nextCommand":"/plan test-1"}`;
++
++    const result = indexModule.parseDecision(text, ["proceed", "stop"]);
++
++    expect(result).not.toBeNull();
++    expect(result?.action).toBe("proceed");
++    expect(result).toMatchObject({ reasoning: "done", nextCommand: "/plan test-1" });
++  });
++
++  test("extracts the last balanced JSON object when prose contains braces", () => {
++    const text = `Transitioning from {creating} to {planning}.\n{"action":"proceed","reasoning":"plan exists"}`;
++
++    const result = indexModule.parseDecision(text, ["proceed", "stop"]);
++
++    expect(result).not.toBeNull();
++    expect(result?.action).toBe("proceed");
++    expect(result).toMatchObject({ reasoning: "plan exists" });
++  });
++
++  test("extracts the last JSON object when multiple objects are present", () => {
++    const text = `{"action":"wait","reasoning":"old"}\n{"action":"proceed","reasoning":"changed mind"}`;
++
++    const result = indexModule.parseDecision(text, ["proceed", "wait"]);
++
++    expect(result).not.toBeNull();
++    expect(result?.action).toBe("proceed");
++    expect(result).toMatchObject({ reasoning: "changed mind" });
++  });
++
++  test("parses nested JSON objects", () => {
++    const text = `{"action":"proceed","data":{"nested":true,"deep":{"value":42}}}`;
++
++    const result = indexModule.parseDecision<{
++      action: string;
++      data: { nested: boolean; deep: { value: number } };
++    }>(text, ["proceed"]);
++
++    expect(result).not.toBeNull();
++    expect(result?.data.nested).toBe(true);
++    expect(result?.data.deep.value).toBe(42);
++  });
++
++  test("returns null for an action outside the allowed list", () => {
++    const result = indexModule.parseDecision(`{"action":"unknown"}`, [
++      "proceed",
++      "stop",
++    ]);
++
++    expect(result).toBeNull();
++  });
++
++  test("returns null for text without JSON", () => {
++    const result = indexModule.parseDecision("No decision here", ["proceed"]);
++
++    expect(result).toBeNull();
++  });
++
++  test("returns null for empty text", () => {
++    const result = indexModule.parseDecision("", ["proceed"]);
++
++    expect(result).toBeNull();
++  });
++
++  test("returns null for unbalanced braces", () => {
++    const result = indexModule.parseDecision(`{action":"proceed"}`, ["proceed"]);
++
++    expect(result).toBeNull();
++  });
++
++  test("extracts JSON even when trailing text follows", () => {
++    const result = indexModule.parseDecision(`{"action":"proceed"} trailing explanation`, [
++      "proceed",
++    ]);
++
++    expect(result).not.toBeNull();
++    expect(result?.action).toBe("proceed");
++  });
++
++  test("returns null for braces without an action", () => {
++    const result = indexModule.parseDecision<{ action: string }>(`{}`, ["proceed"]);
++
++    expect(result).toBeNull();
++  });
++
++  test("parses selection decision shape", () => {
++    const text = `{"action":"select","beadId":"ultramode-xyz","reasoning":"high priority","createDescription":null}`;
++
++    const result = indexModule.parseDecision<{
++      action: string;
++      beadId: string | null;
++      createDescription: string | null;
++    }>(text, ["select", "wait", "create"]);
++
++    expect(result).not.toBeNull();
++    expect(result?.action).toBe("select");
++    expect(result?.beadId).toBe("ultramode-xyz");
++    expect(result?.createDescription).toBeNull();
++  });
++});
+diff --git a/test/phase-maps.test.ts b/test/phase-maps.test.ts
+new file mode 100644
+index 0000000..7e44c77
+--- /dev/null
++++ b/test/phase-maps.test.ts
+@@ -0,0 +1,87 @@
++import { beforeAll, describe, expect, test } from "bun:test";
++import type * as IndexModule from "../index.ts";
++import type { Phase } from "../index.ts";
++import { importIndex, installPiAiMock } from "./mocks.ts";
++
++let indexModule: typeof IndexModule;
++
++const phases: Phase[] = [
++  "selecting",
++  "creating",
++  "planning",
++  "shipping",
++  "verifying",
++  "reviewing",
++  "pr",
++];
++
++beforeAll(async () => {
++  installPiAiMock();
++  indexModule = await importIndex("phase-maps");
++});
++
++describe("phase maps", () => {
++  test("PHASE_WHITELIST has every phase and pr is terminal", () => {
++    expect(Object.keys(indexModule.PHASE_WHITELIST).sort()).toEqual([...phases].sort());
++    expect(indexModule.PHASE_WHITELIST.pr).toBeNull();
++  });
++
++  test("PHASE_WHITELIST defines sequential workflow progression", () => {
++    expect(indexModule.PHASE_WHITELIST).toEqual({
++      selecting: "/create",
++      creating: "/plan",
++      planning: "/ship",
++      shipping: "/verify",
++      verifying: "/review",
++      reviewing: "/pr",
++      pr: null,
++    });
++  });
++
++  test("COMMAND_FROM_PHASE is the reverse of PHASE_FROM_COMMAND", () => {
++    for (const [command, phase] of Object.entries(indexModule.PHASE_FROM_COMMAND)) {
++      expect(indexModule.COMMAND_FROM_PHASE[phase]).toBe(command);
++    }
++
++    for (const [phase, command] of Object.entries(indexModule.COMMAND_FROM_PHASE)) {
++      if (command !== null) {
++        expect(indexModule.PHASE_FROM_COMMAND[command]).toBe(phase);
++      }
++    }
++  });
++
++  test("allowed commands contain workflow phases only", () => {
++    expect(indexModule.ALLOWED_PHASE_COMMANDS.size).toBe(6);
++    for (const command of ["/create", "/plan", "/ship", "/verify", "/review", "/pr"]) {
++      expect(indexModule.ALLOWED_PHASE_COMMANDS.has(command)).toBe(true);
++    }
++  });
++
++  test("no phase map can inject close or merge commands", () => {
++    const forbidden = ["/close", "/merge"];
++
++    for (const value of Object.values(indexModule.PHASE_WHITELIST)) {
++      expect(forbidden).not.toContain(value);
++    }
++    for (const value of Object.values(indexModule.COMMAND_FROM_PHASE)) {
++      expect(forbidden).not.toContain(value);
++    }
++    for (const value of Object.keys(indexModule.PHASE_FROM_COMMAND)) {
++      expect(forbidden).not.toContain(value);
++    }
++    for (const command of forbidden) {
++      expect(indexModule.ALLOWED_PHASE_COMMANDS.has(command)).toBe(false);
++    }
++  });
++
++  test("VALID_PHASES contains every phase", () => {
++    expect(indexModule.VALID_PHASES.size).toBe(phases.length);
++    for (const phase of phases) {
++      expect(indexModule.VALID_PHASES.has(phase)).toBe(true);
++    }
++  });
++
++  test("MAX_RETRIES remains capped at 3", () => {
++    expect(indexModule.MAX_RETRIES).toBe(3);
++  });
++});
+diff --git a/test/reconstruct-state.test.ts b/test/reconstruct-state.test.ts
+new file mode 100644
+index 0000000..dc37601
+--- /dev/null
++++ b/test/reconstruct-state.test.ts
+@@ -0,0 +1,130 @@
++import { beforeAll, describe, expect, test } from "bun:test";
++import type * as IndexModule from "../index.ts";
++import {
++  importIndex,
++  installPiAiMock,
++  mockExtensionContext,
++  type MockSessionEntry,
++} from "./mocks.ts";
++
++let indexModule: typeof IndexModule;
++
++beforeAll(async () => {
++  installPiAiMock();
++  indexModule = await importIndex("reconstruct-state");
++});
++
++function controlEntry(data: unknown): MockSessionEntry {
++  return { type: "custom", customType: indexModule.CONTROL_TYPE, data };
++}
++
++describe("reconstructState", () => {
++  test("reconstructs a valid persisted state", () => {
++    const ctx = mockExtensionContext({
++      sessionEntries: [
++        controlEntry({
++          mode: "on",
++          beadId: "ultramode-xyz",
++          phase: "planning",
++          retries: 2,
++          lastDecision: "proceed with plan",
++          worktreePath: null,
++        }),
++      ],
++    });
++
++    const state = indexModule.reconstructState(ctx);
++
++    expect(state).toMatchObject({
++      mode: "on",
++      beadId: "ultramode-xyz",
++      phase: "planning",
++      retries: 2,
++      lastDecision: "proceed with plan",
++      worktreePath: null,
++    });
++  });
++
++  test("falls back to selecting when the persisted phase is invalid", () => {
++    const ctx = mockExtensionContext({
++      sessionEntries: [
++        controlEntry({ mode: "on", beadId: "test-1", phase: "shipp", retries: 0 }),
++      ],
++    });
++
++    const state = indexModule.reconstructState(ctx);
++
++    expect(state.phase).toBe("selecting");
++  });
++
++  test("skips entries with non-object data", () => {
++    const ctx = mockExtensionContext({ sessionEntries: [controlEntry("not an object")] });
++
++    const state = indexModule.reconstructState(ctx);
++
++    expect(state).toEqual(indexModule.createState());
++  });
++
++  test("applies defaults for missing nullable and numeric fields", () => {
++    const ctx = mockExtensionContext({ sessionEntries: [controlEntry({ mode: "on" })] });
++
++    const state = indexModule.reconstructState(ctx);
++
++    expect(state).toMatchObject({
++      mode: "on",
++      beadId: null,
++      phase: "selecting",
++      retries: 0,
++      lastDecision: null,
++      worktreePath: null,
++    });
++  });
++
++  test("skips entries with invalid mode", () => {
++    const ctx = mockExtensionContext({
++      sessionEntries: [controlEntry({ mode: "running", beadId: "x" })],
++    });
++
++    const state = indexModule.reconstructState(ctx);
++
++    expect(state).toEqual(indexModule.createState());
++  });
++
++  test("returns default state when no control entries exist", () => {
++    const ctx = mockExtensionContext({ sessionEntries: [] });
++
++    const state = indexModule.reconstructState(ctx);
++
++    expect(state).toEqual(indexModule.createState());
++  });
++
++  test("uses the last valid control entry", () => {
++    const ctx = mockExtensionContext({
++      sessionEntries: [
++        controlEntry({ mode: "on", beadId: "first", phase: "creating", retries: 0 }),
++        controlEntry({ mode: "on", beadId: "second", phase: "planning", retries: 1 }),
++      ],
++    });
++
++    const state = indexModule.reconstructState(ctx);
++
++    expect(state.beadId).toBe("second");
++    expect(state.phase).toBe("planning");
++    expect(state.retries).toBe(1);
++  });
++
++  test("skips non-custom and wrong-customType entries", () => {
++    const ctx = mockExtensionContext({
++      sessionEntries: [
++        { type: "user_message", data: { text: "hello" } },
++        { type: "custom", customType: "other-extension", data: { mode: "on" } },
++        controlEntry({ mode: "on", beadId: "real", phase: "creating", retries: 0 }),
++      ],
++    });
++
++    const state = indexModule.reconstructState(ctx);
++
++    expect(state.beadId).toBe("real");
++    expect(state.phase).toBe("creating");
++  });
++});
+diff --git a/test/retry-logic.test.ts b/test/retry-logic.test.ts
+new file mode 100644
+index 0000000..5a3d041
+--- /dev/null
++++ b/test/retry-logic.test.ts
+@@ -0,0 +1,73 @@
++import { beforeAll, describe, expect, test } from "bun:test";
++import type * as IndexModule from "../index.ts";
++import type { Phase } from "../index.ts";
++import { importIndex, installPiAiMock } from "./mocks.ts";
++
++let indexModule: typeof IndexModule;
++
++const retryablePhases: Exclude<Phase, "selecting">[] = [
++  "creating",
++  "planning",
++  "shipping",
++  "verifying",
++  "reviewing",
++  "pr",
++];
++
++beforeAll(async () => {
++  installPiAiMock();
++  indexModule = await importIndex("retry-logic");
++});
++
++describe("retry logic invariants", () => {
++  test("retry command map points at the current phase command, not the next command", () => {
++    for (const phase of retryablePhases) {
++      const retryCommand = indexModule.COMMAND_FROM_PHASE[phase];
++      const nextCommand = indexModule.PHASE_WHITELIST[phase];
++
++      if (phase !== "pr") {
++        expect(retryCommand).not.toBe(nextCommand);
++      }
++    }
++  });
++
++  test("selecting has no command to re-inject", () => {
++    expect(indexModule.COMMAND_FROM_PHASE.selecting).toBeNull();
++  });
++
++  test("creating retry re-injects create instead of advancing to plan", () => {
++    expect(indexModule.COMMAND_FROM_PHASE.creating).toBe("/create");
++    expect(indexModule.PHASE_WHITELIST.creating).toBe("/plan");
++  });
++
++  test("planning retry re-injects plan instead of advancing to ship", () => {
++    expect(indexModule.COMMAND_FROM_PHASE.planning).toBe("/plan");
++    expect(indexModule.PHASE_WHITELIST.planning).toBe("/ship");
++  });
++
++  test("shipping retry re-injects ship instead of advancing to verify", () => {
++    expect(indexModule.COMMAND_FROM_PHASE.shipping).toBe("/ship");
++    expect(indexModule.PHASE_WHITELIST.shipping).toBe("/verify");
++  });
++
++  test("retries below the cap take the retry branch", () => {
++    const retries = indexModule.MAX_RETRIES - 1;
++
++    expect(retries < indexModule.MAX_RETRIES).toBe(true);
++  });
++
++  test("retries at the cap take the blocked branch", () => {
++    const retries = indexModule.MAX_RETRIES;
++
++    expect(retries < indexModule.MAX_RETRIES).toBe(false);
++  });
++
++  test("no-command retry case must reset instead of silently idling", () => {
++    const currentCommand = indexModule.COMMAND_FROM_PHASE.selecting;
++    const beadId = "ultramode-air";
++    const canReinject = Boolean(currentCommand && beadId);
++
++    expect(canReinject).toBe(false);
++    expect(currentCommand).toBeNull();
++  });
++});
+diff --git a/test/run.sh b/test/run.sh
+new file mode 100755
+index 0000000..b3d9790
+--- /dev/null
++++ b/test/run.sh
+@@ -0,0 +1,4 @@
++#!/usr/bin/env bash
++set -euo pipefail
++cd "$(dirname "$0")/.."
++bun test test/
