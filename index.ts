@@ -37,6 +37,10 @@ export interface UltramodeState {
   retries: number;
   lastDecision: string | null;
   worktreePath: string | null;
+  /** The last command ultramode injected via sendUserMessage. Used to filter
+   * turn_end: only chain after turns that ultramode itself triggered, not
+   * after the user's own messages. */
+  lastInjectedCommand: string | null;
 }
 
 export interface SelectionDecision {
@@ -110,10 +114,10 @@ export const COMMAND_FROM_PHASE: Record<Phase, string | null> = {
 export const MAX_RETRIES = 3;
 export const DECISION_TIMEOUT_MS = 120_000; // 2 minutes — hung LLM recovery
 
+
 // ─── State Helpers ───────────────────────────────────────────────────────────
 
 export const CONTROL_TYPE = "ultramode-control";
-
 export function createState(): UltramodeState {
   return {
     mode: "off",
@@ -122,6 +126,7 @@ export function createState(): UltramodeState {
     retries: 0,
     lastDecision: null,
     worktreePath: null,
+    lastInjectedCommand: null,
   };
 }
 
@@ -145,6 +150,23 @@ function persistState(
   state: UltramodeState
 ): void {
   pi.appendEntry(CONTROL_TYPE, { ...state });
+}
+
+/**
+ * Inject a command via sendUserMessage and record it as lastInjectedCommand.
+ * This is the single chokepoint for all command injection — turn_end uses
+ * lastInjectedCommand to filter: only chain after turns ultramode triggered,
+ * not after the user's own messages.
+ */
+function injectCommand(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  state: UltramodeState,
+  command: string
+): void {
+  state.lastInjectedCommand = command;
+  persistState(pi, ctx, state);
+  pi.sendUserMessage(command, { deliverAs: "followUp" });
 }
 
 // Reconstruct state from the session journal by scanning for the last
@@ -178,6 +200,10 @@ export function reconstructState(ctx: ExtensionContext): UltramodeState {
       worktreePath:
         typeof candidate.worktreePath === "string"
           ? candidate.worktreePath
+          : null,
+      lastInjectedCommand:
+        typeof candidate.lastInjectedCommand === "string"
+          ? candidate.lastInjectedCommand
           : null,
     };
   }
@@ -304,6 +330,135 @@ function buildArtifactStatus(beadId: string | null): string {
   return lines.join("\n");
 }
 
+// ─── Deep Verification ────────────────────────────────────────────────────────
+
+interface VerificationEvidence {
+  gitDiff: string;
+  gitStatus: string;
+  testResult: { exitCode: number; output: string } | null;
+  buildResult: { exitCode: number; output: string } | null;
+  artifactStatus: string;
+}
+
+/**
+ * Gather real verification evidence for the LLM decision.
+ * Instead of just checking file existence, this:
+ * - Runs `git diff --stat` to see what changed
+ * - Runs `git status --short` to see uncommitted state
+ * - Runs `bun run check` (tests) and captures exit code + output
+ * - Runs `bun run build` and captures exit code
+ *
+ * This gives the LLM actual evidence to reason about, not just "file exists".
+ */
+async function gatherVerificationEvidence(
+  pi: ExtensionAPI,
+  beadId: string | null
+): Promise<VerificationEvidence> {
+  const evidence: VerificationEvidence = {
+    gitDiff: "",
+    gitStatus: "",
+    testResult: null,
+    buildResult: null,
+    artifactStatus: buildArtifactStatus(beadId),
+  };
+
+  // Git diff — what changed?
+  try {
+    const diffResult = await pi.exec("git", [
+      "diff", "--stat", "HEAD~1",
+    ]);
+    if (diffResult.code === 0) {
+      evidence.gitDiff = truncate(diffResult.stdout, 1500);
+    }
+  } catch {
+    // no commits yet, or not a git repo — skip
+  }
+
+  // Git status — uncommitted changes
+  try {
+    const statusResult = await pi.exec("git", ["status", "--short"]);
+    if (statusResult.code === 0) {
+      evidence.gitStatus = truncate(statusResult.stdout, 500) || "(clean)";
+    }
+  } catch {
+    // skip
+  }
+
+  // Tests — run bun run check (or bun test test/ fallback)
+  try {
+    const testResult = await pi.exec("bun", ["test", "test/"], {
+      timeout: 60_000,
+    });
+    const testOutput = truncate(testResult.stdout + "\n" + testResult.stderr, 800);
+    evidence.testResult = { exitCode: testResult.code, output: testOutput };
+  } catch {
+    // tests not available — skip
+  }
+
+  // Build — run bun build
+  try {
+    const buildResult = await pi.exec(
+      "bun",
+      [
+        "build", "index.ts", "--target", "bun",
+        "--external", "@oh-my-pi/pi-ai",
+        "--external", "@oh-my-pi/pi-coding-agent",
+      ],
+      { timeout: 30_000 }
+    );
+    evidence.buildResult = {
+      exitCode: buildResult.code,
+      output: truncate(buildResult.stderr, 500),
+    };
+  } catch {
+    // build not available — skip
+  }
+
+  return evidence;
+}
+
+/**
+ * Format verification evidence into a human/LLM-readable string for the prompt.
+ */
+function formatVerificationEvidence(e: VerificationEvidence): string {
+  const lines: string[] = [];
+
+  lines.push("## Git Diff (last commit)");
+  lines.push(e.gitDiff || "(no changes or no git history)");
+  lines.push("");
+
+  lines.push("## Git Status (uncommitted)");
+  lines.push(e.gitStatus || "(unknown)");
+  lines.push("");
+
+  lines.push("## Test Results");
+  if (e.testResult) {
+    lines.push(`Exit code: ${e.testResult.exitCode}`);
+    lines.push("Output:");
+    lines.push(e.testResult.output);
+  } else {
+    lines.push("(tests not run — bun test unavailable)");
+  }
+  lines.push("");
+
+  lines.push("## Build Results");
+  if (e.buildResult) {
+    lines.push(`Exit code: ${e.buildResult.exitCode}`);
+    if (e.buildResult.output) {
+      lines.push("Output:");
+      lines.push(e.buildResult.output);
+    }
+  } else {
+    lines.push("(build not run — bun build unavailable)");
+  }
+  lines.push("");
+
+  lines.push("## Artifact Status");
+  lines.push(e.artifactStatus);
+
+  return lines.join("\n");
+}
+
 // ─── Widget ──────────────────────────────────────────────────────────────────
 
 function updateWidget(ctx: ExtensionContext, state: UltramodeState): void {
@@ -415,7 +570,7 @@ export async function runSelection(
       `ultramode: creating bead — ${description.slice(0, 80)}`,
       "info"
     );
-    pi.sendUserMessage(`/create ${description}`, { deliverAs: "followUp" });
+    injectCommand(pi, ctx, state, `/create ${description}`);
     return;
   }
 
@@ -530,15 +685,15 @@ export async function runSelection(
     state.phase = "creating";
     state.retries = 0;
     state.mode = "on";
+    // Create isolated worktree for this bead
+    state.worktreePath = await createWorktree(pi, ctx, decision.beadId);
     persistState(pi, ctx, state);
     updateWidget(ctx, state);
     ctx.ui.notify(
       `ultramode: selected bead ${decision.beadId} — ${decision.reasoning}`,
       "info"
     );
-    pi.sendUserMessage(`/create ${decision.beadId}`, {
-      deliverAs: "followUp",
-    });
+    injectCommand(pi, ctx, state, `/create ${decision.beadId}`);
   } else if (decision.action === "wait") {
     state.mode = "idle";
     persistState(pi, ctx, state);
@@ -555,9 +710,7 @@ export async function runSelection(
       `ultramode: creating new bead — ${decision.reasoning}`,
       "info"
     );
-    pi.sendUserMessage(`/create ${decision.createDescription}`, {
-      deliverAs: "followUp",
-    });
+    injectCommand(pi, ctx, state, `/create ${decision.createDescription}`);
   } else {
     ctx.ui.notify(
       "ultramode: selection returned an unrecognized action — idling",
@@ -597,6 +750,72 @@ async function markBlocked(
     `ultramode: bead ${state.beadId} marked blocked — ${reasoning}`,
     "warning"
   );
+  await removeWorktree(pi, ctx, state.worktreePath);
+  state.worktreePath = null;
+}
+
+/**
+ * Create a git worktree for bead isolation. The agent works in the worktree
+ * instead of the main working tree, so its changes don't interfere with the
+ * user's work. The tool_call handler enforces scope: edits outside the
+ * worktree (except .beads/ and .omp/) are blocked.
+ */
+async function createWorktree(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  beadId: string
+): Promise<string | null> {
+  const branchName = `ultramode/${beadId}`;
+  const worktreePath = `.worktrees/${beadId}`;
+
+  try {
+    // Remove stale worktree if it exists
+    await pi.exec("git", ["worktree", "remove", "--force", worktreePath]);
+  } catch {
+    // doesn't exist — fine
+  }
+
+  try {
+    // Create worktree with a new branch from HEAD
+    const result = await pi.exec("git", [
+      "worktree", "add", "-b", branchName, worktreePath, "HEAD",
+    ]);
+    if (result.code === 0) {
+      ctx.ui.notify(
+        `ultramode: created worktree at ${worktreePath} (branch: ${branchName})`,
+        "info"
+      );
+      return worktreePath;
+    }
+    ctx.ui.notify(
+      `ultramode: worktree creation failed — ${result.stderr}`,
+      "warning"
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    ctx.ui.notify(`ultramode: worktree creation error — ${msg}`, "warning");
+  }
+  return null;
+}
+
+/**
+ * Remove a git worktree and its branch after the bead is done.
+ */
+async function removeWorktree(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  worktreePath: string | null
+): Promise<void> {
+  if (!worktreePath) return;
+  try {
+    await pi.exec("git", ["worktree", "remove", "--force", worktreePath]);
+    ctx.ui.notify(
+      `ultramode: removed worktree ${worktreePath}`,
+      "info"
+    );
+  } catch {
+    // non-fatal — might already be removed
+  }
 }
 
 export async function handleTurnEnd(
@@ -611,8 +830,10 @@ export async function handleTurnEnd(
   // Extract last assistant output
   const lastOutput = truncate(extractText(message), 2000);
 
-  // Build artifact status
-  const artifactStatus = buildArtifactStatus(state.beadId);
+  // Gather deep verification evidence: git diff, git status, test results,
+  // build results, artifact status. This replaces the old shallow "file
+  // exists + line count" check with actual runtime evidence.
+  const evidence = await gatherVerificationEvidence(pi, state.beadId);
 
   // Fetch bv triage for context (cached-ish — re-fetch each decision)
   let triageJson = "{}";
@@ -629,7 +850,7 @@ export async function handleTurnEnd(
     // non-fatal
   }
 
-  // Build decision prompt
+  // Build decision prompt with deep evidence
   const template = loadPrompt("decision-prompt");
   const prompt = fillTemplate(template, {
     bead_id: state.beadId ?? "none",
@@ -637,7 +858,7 @@ export async function handleTurnEnd(
     retries: String(state.retries),
     bv_triage_json: triageJson,
     last_output: lastOutput,
-    artifact_status: artifactStatus,
+    artifact_status: formatVerificationEvidence(evidence),
   });
 
   // Call LLM
@@ -752,7 +973,7 @@ export async function handleTurnEnd(
       `ultramode: proceeding — ${decision.reasoning}`,
       "info"
     );
-    pi.sendUserMessage(fullCommand, { deliverAs: "followUp" });
+    injectCommand(pi, ctx, state, fullCommand);
   } else if (decision.action === "retry") {
     if (state.retries < MAX_RETRIES) {
       state.retries++;
@@ -766,9 +987,7 @@ export async function handleTurnEnd(
       // COMMAND_FROM_PHASE maps phase → the command that started it.
       const currentCmd = COMMAND_FROM_PHASE[state.phase];
       if (currentCmd && state.beadId) {
-        pi.sendUserMessage(`${currentCmd} ${state.beadId}`, {
-          deliverAs: "followUp",
-        });
+        injectCommand(pi, ctx, state, `${currentCmd} ${state.beadId}`);
       } else {
         // Can't re-inject (no command for this phase, or no beadId).
         // Reset to selection rather than getting stuck with mode=on but no turn.
@@ -813,6 +1032,9 @@ export async function handleTurnEnd(
         "info"
       );
     }
+    // Clean up worktree when stopping (bead done or stopped)
+    await removeWorktree(pi, ctx, state.worktreePath);
+    state.worktreePath = null;
     state.mode = "idle";
     persistState(pi, ctx, state);
     updateWidget(ctx, state);
@@ -843,6 +1065,29 @@ export default function ultramode(pi: ExtensionAPI): void {
       // Only act if mode is on
       const state = getState(ctx);
       if (state.mode !== "on") return;
+
+      // Turn filter: only chain after turns that ultramode itself triggered.
+      // This prevents the extension from firing on the user's own messages.
+      // We check if the last user message in the conversation matches our
+      // lastInjectedCommand. If not, this turn was user-initiated — skip.
+      if (state.lastInjectedCommand) {
+        // Get the conversation history to find the last user message
+        const branch = ctx.sessionManager.getBranch();
+        const lastUserMsg = [...branch]
+          .reverse()
+          .find((e) => e.type === "user");
+        if (lastUserMsg) {
+          const userText =
+            typeof (lastUserMsg as any).content === "string"
+              ? (lastUserMsg as any).content
+              : "";
+          // Extract just the command (first line, before any newline)
+          const injectedCmd = state.lastInjectedCommand.split("\n")[0].trim();
+          if (!userText.includes(injectedCmd)) {
+            return; // User's own turn, not ours
+          }
+        }
+      }
 
       // Skip if there are pending messages (e.g. a queued followUp)
       // to avoid racing with our own injected commands
