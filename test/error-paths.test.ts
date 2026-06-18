@@ -350,7 +350,7 @@ describe("decide timeout", () => {
     await expect(decide(ctx, "prompt", 50)).rejects.toThrow("timed out");
   });
 
-  test("passes AbortSignal to complete()", async () => {
+  test("passes AbortSignal to complete() and asserts timeout rejection", async () => {
     const calls: { signal?: AbortSignal; abortedAtCallTime?: boolean }[] = [];
     installPiAiMock({
       complete: async (_m: unknown, _c: unknown, opts?: { signal?: AbortSignal }) => {
@@ -360,11 +360,23 @@ describe("decide timeout", () => {
     });
     const { decide } = await importIndex("timeout-signal-passed");
     const ctx = mockExtensionContext();
-    decide(ctx, "prompt", 50).catch(() => {});
-    await new Promise((r) => setTimeout(r, 100));
+    // Assert BOTH the rejection and the signal capture — no floating promise
+    await expect(decide(ctx, "prompt", 50)).rejects.toThrow("timed out");
     expect(calls).toHaveLength(1);
     expect(calls[0].signal).toBeInstanceOf(AbortSignal);
     expect(calls[0].abortedAtCallTime).toBe(false);
+  });
+
+  test("returns extracted text on fast LLM completion (Promise.race fast path)", async () => {
+    installPiAiMock({
+      complete: async () => ({
+        content: [{ type: "text" as const, text: "fast decision response" }],
+      }),
+    });
+    const { decide } = await importIndex("timeout-fast-success");
+    const ctx = mockExtensionContext();
+    const result = await decide(ctx, "prompt", 5000);
+    expect(result).toBe("fast decision response");
   });
 
   test("completeSimple fallback receives the signal", async () => {
@@ -406,5 +418,18 @@ describe("decide timeout", () => {
     const { decide } = await importIndex("timeout-regression-key");
     const ctx = mockExtensionContext({ getApiKeyResult: undefined });
     await expect(decide(ctx, "prompt", 5000)).rejects.toThrow("no API key");
+  });
+  test("rejects invalid timeoutMs values (Infinity, 0, negative, NaN)", async () => {
+    installPiAiMock();
+    const { decide } = await importIndex("timeout-validation");
+    const ctx = mockExtensionContext();
+    await expect(decide(ctx, "prompt", Infinity)).rejects.toThrow("invalid timeoutMs");
+    await expect(decide(ctx, "prompt", 0)).rejects.toThrow("invalid timeoutMs");
+    await expect(decide(ctx, "prompt", -1)).rejects.toThrow("invalid timeoutMs");
+    await expect(decide(ctx, "prompt", NaN)).rejects.toThrow("invalid timeoutMs");
+  });
+  test("DECISION_TIMEOUT_MS is exported and equals 120000", async () => {
+    const { DECISION_TIMEOUT_MS } = await importIndex("timeout-constant-value");
+    expect(DECISION_TIMEOUT_MS).toBe(120000);
   });
 });

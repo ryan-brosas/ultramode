@@ -66,4 +66,13 @@
 
 ## Summary
 
-All 4 review findings have been addressed: (1) PRD acceptance criteria updated to replace fragile wall-clock timing with the actual verification method; (2) `signal.aborted === false` assertions added to both signal tests using a capture-in-mock pattern; (3) `context-capsule.md` line 22 updated to reflect the shipped defense-in-depth approach; (4) test comment reworded to clarify caller behavior is verified by code inspection, not by the test block. The implementation is functionally correct — 54/54 tests pass (172 expect() calls, 306ms), build typechecks clean, all 8 PRD requirements satisfied, BugScan found zero bugs. The `Promise.race` + signal defense-in-depth approach is more robust than the plan's signal-only design. Safe to merge.
+All 4 review findings from the first pass have been addressed: (1) PRD acceptance criteria updated to replace fragile wall-clock timing with the actual verification method; (2) `signal.aborted === false` assertions added to both signal tests using a capture-in-mock pattern; (3) `context-capsule.md` line 22 updated to reflect the shipped defense-in-depth approach; (4) test comment reworded to clarify caller behavior is verified by code inspection, not by the test block.
+
+A second deep review pass (6 agents: AsyncConcurrency, TestQuality, APIContract, EdgeCases, SecurityResources, FreshBugScan) found 0 bugs — all 5 async/concurrency concerns verified as non-issues via empirical Bun reproduction. 6 high-confidence findings (all low/medium), 4 addressed:
+
+- **timeoutMs=Infinity silent footgun** → Added input validation guard (`!Number.isFinite(timeoutMs) || timeoutMs <= 0`) with test covering Infinity, 0, -1, NaN
+- **Fast-success path untested** → Added test exercising `complete()` resolving quickly through `Promise.race` wrapper
+- **Floating promise anti-pattern** → Rewrote signal test to `await expect(decide(...)).rejects.toThrow("timed out")` instead of floating `.catch(() => {})`
+- **DECISION_TIMEOUT_MS export unused by tests** → Added constant value assertion test
+
+2 findings accepted as-is (signal.aborted guard is defensive code; timeoutMs parameter is a documented tradeoff). Final state: 57/57 tests pass (179 expect() calls, 263ms), build typechecks clean, all 8 PRD requirements satisfied. Safe to merge.

@@ -330,6 +330,10 @@ export async function decide(
   promptText: string,
   timeoutMs: number = DECISION_TIMEOUT_MS
 ): Promise<string> {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0)
+    throw new Error(
+      `ultramode: invalid timeoutMs ${timeoutMs} — must be a positive finite number`
+    );
   const model = ctx.model;
   if (!model) throw new Error("ultramode: no active model on session");
 
