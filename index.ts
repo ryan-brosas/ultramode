@@ -179,16 +179,33 @@ function persistState(
  * This is the single chokepoint for all command injection — turn_end uses
  * lastInjectedCommand to filter: only chain after turns ultramode triggered,
  * not after the user's own messages.
+ *
+ * `queued` controls delivery:
+ *  - true (default): `deliverAs: "followUp"`. Used from turn_end, which fires
+ *    after an assistant message — #canAutoContinueForFollowUp() sees last.role
+ *    === "assistant" and drains the queue, auto-continuing the loop.
+ *  - false: direct prompt (no deliverAs). Used from runSelection, which runs in
+ *    command-handler or session_start context where the agent is idle with no
+ *    recent assistant message. A followUp queued here would never drain
+ *    (#canAutoContinueForFollowUp returns false when the last message isn't
+ *    assistant/toolResult), so the loop would stall. Direct prompt triggers a
+ *    real turn immediately. The autoresearch extension uses this same pattern
+ *    (sendUserMessage(goalArg) with no deliverAs) from its command handler.
  */
 function injectCommand(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   state: UltramodeState,
-  command: string
+  command: string,
+  queued = true
 ): void {
   state.lastInjectedCommand = command;
   persistState(pi, ctx, state);
-  pi.sendUserMessage(command, { deliverAs: "followUp" });
+  if (queued) {
+    pi.sendUserMessage(command, { deliverAs: "followUp" });
+  } else {
+    pi.sendUserMessage(command);
+  }
 }
 
 // Reconstruct state from the session journal by scanning for the last
@@ -720,7 +737,7 @@ export async function runSelection(
       `ultramode: creating bead — ${description.slice(0, 80)}`,
       "info"
     );
-    injectCommand(pi, ctx, state, `/create ${description}`);
+    injectCommand(pi, ctx, state, `/create ${description}`, false);
     return;
   }
 
@@ -868,7 +885,7 @@ export async function runSelection(
       `ultramode: selected bead ${decision.beadId} — ${decision.reasoning}`,
       "info"
     );
-    injectCommand(pi, ctx, state, `/create ${decision.beadId}`);
+    injectCommand(pi, ctx, state, `/create ${decision.beadId}`, false);
   } else if (decision.action === "wait") {
     state.mode = "idle";
     persistState(pi, ctx, state);
@@ -888,7 +905,7 @@ export async function runSelection(
     );
     // Go to /brainstorm first, not /create. Brainstorm explores the
     // codebase and produces grounded ideas, then /create formalizes them.
-    injectCommand(pi, ctx, state, `/brainstorm ${decision.createDescription}`);
+    injectCommand(pi, ctx, state, `/brainstorm ${decision.createDescription}`, false);
   } else {
     ctx.ui.notify(
       "ultramode: selection returned an unrecognized action — idling",
@@ -949,11 +966,21 @@ async function createWorktree(
   const branchName = `ultramode/${beadId}`;
   const worktreePath = `.worktrees/${beadId}`;
 
+  // Clean up stale worktree directory and branch from prior runs.
+  // If a previous run created the worktree + branch but was interrupted
+  // (crash, session restart, /ultramode off mid-flight), the branch
+  // survives even after the worktree directory is removed. A stale branch
+  // makes `git worktree add -b` fail with "a branch named X already
+  // exists" — so delete both before creating fresh.
   try {
-    // Remove stale worktree if it exists
     await pi.exec("git", ["worktree", "remove", "--force", worktreePath]);
   } catch {
-    // doesn't exist — fine
+    // worktree doesn't exist — fine
+  }
+  try {
+    await pi.exec("git", ["branch", "-D", branchName]);
+  } catch {
+    // branch doesn't exist — fine
   }
 
   try {
@@ -1411,16 +1438,29 @@ export default function ultramode(pi: ExtensionAPI): void {
       // We check if the last user message in the conversation matches our
       // lastInjectedCommand. If not, this turn was user-initiated — skip.
       if (state.lastInjectedCommand) {
-        // Get the conversation history to find the last user message
+        // Session entries use type: "message" with message.role === "user"
+        // (not type: "user"). Find the last user message in the branch.
         const branch = ctx.sessionManager.getBranch();
-        const lastUserMsg = [...branch]
+        const lastUserEntry = [...branch]
           .reverse()
-          .find((e) => e.type === "user");
-        if (lastUserMsg) {
-          const userText =
-            typeof (lastUserMsg as any).content === "string"
-              ? (lastUserMsg as any).content
-              : "";
+          .find(
+            (e) =>
+              e.type === "message" &&
+              (e as any).message?.role === "user"
+          );
+        if (lastUserEntry) {
+          const msg = (lastUserEntry as any).message;
+          // Extract text from content blocks (array of {type:"text", text})
+          // or plain string content
+          let userText = "";
+          if (typeof msg.content === "string") {
+            userText = msg.content;
+          } else if (Array.isArray(msg.content)) {
+            userText = msg.content
+              .filter((b: any) => b.type === "text" && typeof b.text === "string")
+              .map((b: any) => b.text)
+              .join("\n");
+          }
           // Extract just the command (first line, before any newline)
           const injectedCmd = state.lastInjectedCommand.split("\n")[0].trim();
           if (!userText.includes(injectedCmd)) {
