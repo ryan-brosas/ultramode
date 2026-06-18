@@ -23,6 +23,7 @@ import type {
 
 export type Phase =
   | "selecting"
+  | "brainstorming"
   | "creating"
   | "planning"
   | "shipping"
@@ -53,7 +54,7 @@ export interface UltramodeState {
 }
 
 export interface SelectionDecision {
-  action: "select" | "wait" | "create";
+  action: "select" | "wait" | "brainstorm";
   beadId: string | null;
   reasoning: string;
   createDescription: string | null;
@@ -68,9 +69,9 @@ export interface PhaseDecision {
 // ─── Phase Whitelist ─────────────────────────────────────────────────────────
 
 // Maps each phase to the command that transitions out of it.
-// Terminal case is `pr` → null (loop stops, human merges).
 export const PHASE_WHITELIST: Record<Phase, string | null> = {
-  selecting: "/create",
+  selecting: "/brainstorm",
+  brainstorming: "/create",
   creating: "/plan",
   planning: "/ship",
   shipping: "/verify",
@@ -81,6 +82,7 @@ export const PHASE_WHITELIST: Record<Phase, string | null> = {
 
 // Reverse map: command → resulting phase.
 export const PHASE_FROM_COMMAND: Record<string, Phase> = {
+  "/brainstorm": "brainstorming",
   "/create": "creating",
   "/plan": "planning",
   "/ship": "shipping",
@@ -90,6 +92,7 @@ export const PHASE_FROM_COMMAND: Record<string, Phase> = {
 };
 
 export const ALLOWED_PHASE_COMMANDS = new Set([
+  "/brainstorm",
   "/create",
   "/plan",
   "/ship",
@@ -99,6 +102,7 @@ export const ALLOWED_PHASE_COMMANDS = new Set([
 ]);
 export const VALID_PHASES = new Set<Phase>([
   "selecting",
+  "brainstorming",
   "creating",
   "planning",
   "shipping",
@@ -112,6 +116,7 @@ export const VALID_PHASES = new Set<Phase>([
 // (PHASE_WHITELIST maps phase → next command, which is the wrong direction for retries.)
 export const COMMAND_FROM_PHASE: Record<Phase, string | null> = {
   selecting: null,
+  brainstorming: "/brainstorm",
   creating: "/create",
   planning: "/plan",
   shipping: "/ship",
@@ -780,7 +785,7 @@ export async function runSelection(
   const decision = parseDecision<SelectionDecision>(decisionText, [
     "select",
     "wait",
-    "create",
+    "brainstorm",
   ]);
 
   if (!decision) {
@@ -833,15 +838,18 @@ export async function runSelection(
       `ultramode: no ready work — ${decision.reasoning}`,
       "info"
     );
-  } else if (decision.action === "create" && decision.createDescription) {
+  } else if (decision.action === "brainstorm" && decision.createDescription) {
     state.mode = "on";
+    state.phase = "brainstorming";
     persistState(pi, ctx, state);
     updateWidget(ctx, state);
     ctx.ui.notify(
-      `ultramode: creating new bead — ${decision.reasoning}`,
+      `ultramode: brainstorming — ${decision.reasoning}`,
       "info"
     );
-    injectCommand(pi, ctx, state, `/create ${decision.createDescription}`);
+    // Go to /brainstorm first, not /create. Brainstorm explores the
+    // codebase and produces grounded ideas, then /create formalizes them.
+    injectCommand(pi, ctx, state, `/brainstorm ${decision.createDescription}`);
   } else {
     ctx.ui.notify(
       "ultramode: selection returned an unrecognized action — idling",

@@ -7,6 +7,7 @@ let indexModule: typeof IndexModule;
 
 const phases: Phase[] = [
   "selecting",
+  "brainstorming",
   "creating",
   "planning",
   "shipping",
@@ -28,7 +29,8 @@ describe("phase maps", () => {
 
   test("PHASE_WHITELIST defines sequential workflow progression", () => {
     expect(indexModule.PHASE_WHITELIST).toEqual({
-      selecting: "/create",
+      selecting: "/brainstorm",
+      brainstorming: "/create",
       creating: "/plan",
       planning: "/ship",
       shipping: "/verify",
@@ -49,10 +51,9 @@ describe("phase maps", () => {
       }
     }
   });
-
   test("allowed commands contain workflow phases only", () => {
-    expect(indexModule.ALLOWED_PHASE_COMMANDS.size).toBe(6);
-    for (const command of ["/create", "/plan", "/ship", "/verify", "/review", "/pr"]) {
+    expect(indexModule.ALLOWED_PHASE_COMMANDS.size).toBe(7);
+    for (const command of ["/brainstorm", "/create", "/plan", "/ship", "/verify", "/review", "/pr"]) {
       expect(indexModule.ALLOWED_PHASE_COMMANDS.has(command)).toBe(true);
     }
   });

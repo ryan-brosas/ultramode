@@ -28,6 +28,7 @@ Don't just check structure — evaluate the APPROACH. Does the work fit the proj
 ### Proceed
 Choose `proceed` only when you have READ the artifact content AND verified it is both structurally complete AND architecturally sound:
 
+- **brainstorming → /create**: READ the agent's output. Did it explore the codebase? Did it identify concrete, grounded ideas — not vague suggestions? Did it reference actual files, functions, or patterns? If the brainstorm produced real, actionable ideas → proceed to /create. If it's vague, didn't explore the codebase, or produced generic suggestions → retry.
 - **creating → /plan**: READ the PRD content. Does it have: Problem, Requirements, Out of Scope, Success Criteria? Now cross-reference with the Codebase Context below — does the approach fit the project's conventions (naming, workflow, tech stack)? Does it solve the RIGHT problem, not just a symptom? If the approach is sound and the structure is complete → proceed. If it's thin, missing sections, OR the approach doesn't fit the project → retry.
 - **planning → /ship**: READ the plan.md and tasks.md content. Blast radius? Wave sequencing? Verification gates? Actionable tasks? Now check: does the plan match the codebase structure? Are the file paths correct? Does it follow patterns from AGENTS.md? If sound → proceed. If vague, wrong paths, or ignores conventions → retry.
 - **shipping → /verify**: READ the full git diff. Do the code changes match the PRD? Are there real changes (not comments/whitespace)? Tests pass? Build passes? Now check: does the code follow the project's patterns? Are there obvious anti-patterns given the codebase context? If the code is correct and fits → proceed. If tests/build failed or the approach is wrong → retry.
@@ -35,6 +36,7 @@ Choose `proceed` only when you have READ the artifact content AND verified it is
 - **reviewing → /pr**: READ the review-report.md. Was the work reviewed? What confidence? If review completed → proceed. If review is missing or shallow → retry.
 
 When proceeding, specify the `nextCommand` from this whitelist ONLY:
+- After `brainstorming` → `/create`
 - After `creating` → `/plan`
 - After `planning` → `/ship`
 - After `shipping` → `/verify`
