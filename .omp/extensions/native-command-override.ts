@@ -1,6 +1,5 @@
 import { readFileSync, existsSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 
 /**
  * Native command override.
@@ -55,23 +54,21 @@ interface ExtensionApi {
 /** Command names that the harness ships as builtins and that this template also defines as file commands. */
 const SHADOWED_NAMES = ["plan", "review"] as const;
 
-const __dirname = typeof __dirname !== "undefined"
-	? __dirname
-	: (import.meta.url ? dirname(fileURLToPath(import.meta.url)) : process.cwd());
+const COMMAND_DIR = join(process.cwd(), ".omp", "commands");
 
 /**
  * Read the command body for a given name from .omp/commands/<name>.md relative
- * to this extension's directory. Strips the YAML frontmatter so only the
+ * to the active workspace. Strips the YAML frontmatter so only the
  * prompt body reaches the model. Returns null if the file is missing.
  */
 function loadCommandBody(name: string): string | null {
-	const path = join(__dirname, "..", "commands", `${name}.md`);
+	const path = join(COMMAND_DIR, `${name}.md`);
 	if (!existsSync(path)) return null;
 	const content = readFileSync(path, "utf8");
 	// Strip a leading frontmatter block delimited by --- lines, matching the
 	// harness parseFrontmatter behavior for file commands.
 	const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(content);
-	return match ? match[2] : content;
+	return (match ? match[2] : content).trimStart();
 }
 
 /**

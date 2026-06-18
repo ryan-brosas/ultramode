@@ -87,7 +87,7 @@ export interface MockAPIOverrides {
 
 export interface MockExtensionAPI {
   exec: Spy<[string, string[]], Promise<{ stdout: string; code: number }>>;
-  sendUserMessage: Spy<[string, { deliverAs: "followUp" }], void>;
+  sendUserMessage: Spy<[string, { deliverAs?: "steer" | "followUp" }?], void>;
   appendEntry: Spy<[string, unknown], void>;
   registerCommand: Spy<
     [
@@ -117,7 +117,7 @@ export function mockExtensionAPI(overrides: MockAPIOverrides = {}): MockExtensio
         return overrides.execResult ?? { stdout: "{}", code: 0 };
       }
     ),
-    sendUserMessage: createSpy<[string, { deliverAs: "followUp" }], void>(
+    sendUserMessage: createSpy<[string, { deliverAs?: "steer" | "followUp" }?], void>(
       () => undefined
     ),
     appendEntry: createSpy<[string, unknown], void>(() => undefined),

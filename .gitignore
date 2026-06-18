@@ -3,3 +3,6 @@
 
 # bv (beads viewer) local config and caches
 .bv/
+
+# dependencies
+node_modules/

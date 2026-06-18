@@ -97,13 +97,16 @@ describe("retry branch behavior via handleTurnEnd", () => {
 
     await handleTurnEnd(pi, ctx, { content: "assistant output" });
 
-    // Retry should re-inject /plan (COMMAND_FROM_PHASE.planning),
-    // NOT /ship (PHASE_WHITELIST.planning), with feedback appended.
+    // Retry should re-inject the expanded /plan body
+    // (COMMAND_FROM_PHASE.planning), NOT /ship (PHASE_WHITELIST.planning),
+    // with feedback appended outside the bead-id argument.
     const sendCalls = (pi as unknown as MockExtensionAPI).sendUserMessage.calls;
     expect(sendCalls).toHaveLength(1);
-    expect(sendCalls[0][0]).toBe(
-      "/plan ultramode-test\n\nFeedback from previous attempt: test retry"
+    expect(sendCalls[0][0]).toContain('br show "ultramode-test" --json');
+    expect(sendCalls[0][0]).toContain(
+      "Feedback from previous attempt: test retry"
     );
+    expect(sendCalls[0][0]).not.toContain("/ship ultramode-test");
     expect(sendCalls[0][1]).toEqual({ deliverAs: "followUp" });
 
     // State: retries incremented, still on, same bead.

@@ -95,6 +95,6 @@ Return ONLY a JSON object on the last line, with this exact schema:
 }
 ```
 
-The `nextCommand` must be one of: `/plan`, `/ship`, `/verify`, `/review`, `/pr` — followed by a space and the bead ID. Set to `null` when action is not `proceed`.
+The `nextCommand` must be one of: `/create`, `/brainstorm`, `/plan`, `/ship`, `/verify`, `/review`, `/pr` — followed by a space and the bead ID. Set to `null` when action is not `proceed`.
 
 **Critical**: Your reasoning MUST cite specific evidence. For example: "PRD has 12 requirements with acceptance criteria, Out of Scope lists 8 items, approach uses Promise.race which matches the timeout pattern in index.ts:522" — not just "PRD looks good". If you didn't read the content, you cannot proceed. Take your time — think through whether the approach is right before deciding.

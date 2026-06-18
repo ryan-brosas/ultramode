@@ -29,5 +29,8 @@
     "extensions": [
       "./index.ts"
     ]
+  },
+  "dependencies": {
+    "@oh-my-pi/pi-ai": "16.0.4"
   }
 }
