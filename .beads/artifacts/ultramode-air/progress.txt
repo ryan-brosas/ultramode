@@ -1,0 +1,12 @@
+COMPLETED: Resolved ultramode-air, checked PRD/plan/tasks/context capsule, and confirmed plan alignment to MUST requirements.
+COMPLETED: Ran graph checks: bv triage/alerts clean, dependency tree depth 0, no blockers.
+COMPLETED: Checked file context for index.ts: no linked file beads, no related files, no target hotspots.
+COMPLETED: Claimed bead as in_progress with actor assistant.
+COMPLETED: Added Bun tests for parseDecision, reconstructState, phase maps, retry invariants, decide error paths, helper behavior, and reusable mocks.
+COMPLETED: Observed RED before exports: bun test test/ exited 1 with missing named exports/unresolved dependency failures.
+COMPLETED: Exported existing internals from index.ts and tightened extractText input from any to unknown without changing runtime behavior.
+COMPLETED: Observed GREEN after exports and mocks: bun test test/ passed with 44 tests.
+COMPLETED: Added test/run.sh runner for bun test test/.
+COMPLETED: Full verification passed: focused test files, bash test/run.sh, bun test test/, bun build index.ts --no-bundle, br lint, and br dep cycles all exited 0.
+COMPLETED: Search checks found no /close in index.ts and no unfinished markers in changed implementation/test files.
+NEXT: Sync bead state and commit scoped implementation.

@@ -21,7 +21,7 @@ import type {
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-type Phase =
+export type Phase =
   | "selecting"
   | "creating"
   | "planning"
@@ -30,7 +30,7 @@ type Phase =
   | "reviewing"
   | "pr";
 
-interface UltramodeState {
+export interface UltramodeState {
   mode: "off" | "on" | "idle";
   beadId: string | null;
   phase: Phase;
@@ -39,14 +39,14 @@ interface UltramodeState {
   worktreePath: string | null;
 }
 
-interface SelectionDecision {
+export interface SelectionDecision {
   action: "select" | "wait" | "create";
   beadId: string | null;
   reasoning: string;
   createDescription: string | null;
 }
 
-interface PhaseDecision {
+export interface PhaseDecision {
   action: "proceed" | "reject" | "retry" | "stop";
   reasoning: string;
   nextCommand: string | null;
@@ -56,7 +56,7 @@ interface PhaseDecision {
 
 // Maps each phase to the command that transitions out of it.
 // Terminal case is `pr` → null (loop stops, human merges).
-const PHASE_WHITELIST: Record<Phase, string | null> = {
+export const PHASE_WHITELIST: Record<Phase, string | null> = {
   selecting: "/create",
   creating: "/plan",
   planning: "/ship",
@@ -67,7 +67,7 @@ const PHASE_WHITELIST: Record<Phase, string | null> = {
 };
 
 // Reverse map: command → resulting phase.
-const PHASE_FROM_COMMAND: Record<string, Phase> = {
+export const PHASE_FROM_COMMAND: Record<string, Phase> = {
   "/create": "creating",
   "/plan": "planning",
   "/ship": "shipping",
@@ -76,7 +76,7 @@ const PHASE_FROM_COMMAND: Record<string, Phase> = {
   "/pr": "pr",
 };
 
-const ALLOWED_PHASE_COMMANDS = new Set([
+export const ALLOWED_PHASE_COMMANDS = new Set([
   "/create",
   "/plan",
   "/ship",
@@ -84,7 +84,7 @@ const ALLOWED_PHASE_COMMANDS = new Set([
   "/review",
   "/pr",
 ]);
-const VALID_PHASES = new Set<Phase>([
+export const VALID_PHASES = new Set<Phase>([
   "selecting",
   "creating",
   "planning",
@@ -97,7 +97,7 @@ const VALID_PHASES = new Set<Phase>([
 // Reverse of PHASE_FROM_COMMAND: maps a phase to the command that started it.
 // Used by the retry path to re-inject the current phase's command.
 // (PHASE_WHITELIST maps phase → next command, which is the wrong direction for retries.)
-const COMMAND_FROM_PHASE: Record<Phase, string | null> = {
+export const COMMAND_FROM_PHASE: Record<Phase, string | null> = {
   selecting: null,
   creating: "/create",
   planning: "/plan",
@@ -107,13 +107,13 @@ const COMMAND_FROM_PHASE: Record<Phase, string | null> = {
   pr: "/pr",
 };
 
-const MAX_RETRIES = 3;
+export const MAX_RETRIES = 3;
 
 // ─── State Helpers ───────────────────────────────────────────────────────────
 
-const CONTROL_TYPE = "ultramode-control";
+export const CONTROL_TYPE = "ultramode-control";
 
-function createState(): UltramodeState {
+export function createState(): UltramodeState {
   return {
     mode: "off",
     beadId: null,
@@ -128,7 +128,7 @@ function createState(): UltramodeState {
 // don't collide.
 const sessionStates = new Map<string, UltramodeState>();
 
-function getState(ctx: ExtensionContext): UltramodeState {
+export function getState(ctx: ExtensionContext): UltramodeState {
   const key = ctx.sessionManager.getSessionId();
   let state = sessionStates.get(key);
   if (!state) {
@@ -149,7 +149,7 @@ function persistState(
 // Reconstruct state from the session journal by scanning for the last
 // ultramode-control custom entry. Same pattern as autoresearch's
 // reconstructControlState (autoresearch/state.ts:220).
-function reconstructState(ctx: ExtensionContext): UltramodeState {
+export function reconstructState(ctx: ExtensionContext): UltramodeState {
   const entries = ctx.sessionManager.getBranch();
   let reconstructed = createState();
   for (const entry of entries) {
@@ -207,25 +207,26 @@ function fillTemplate(
 
 // Extract text from an AgentMessage's content blocks.
 // AgentMessage.content can be a string or an array of content blocks.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function extractText(message: any): string {
-  if (!message) return "";
-  const content = message.content;
+export function extractText(message: unknown): string {
+  if (!message || typeof message !== "object") return "";
+  const content = (message as { content?: unknown }).content;
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
     return content
       .filter(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (b: any) => b.type === "text" && typeof b.text === "string"
+        (block): block is { type: "text"; text: string } =>
+          Boolean(block) &&
+          typeof block === "object" &&
+          (block as { type?: unknown }).type === "text" &&
+          typeof (block as { text?: unknown }).text === "string"
       )
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .map((b: any) => b.text)
+      .map((block) => block.text)
       .join("");
   }
   return "";
 }
 
-function truncate(text: string, maxLen: number): string {
+export function truncate(text: string, maxLen: number): string {
   if (text.length <= maxLen) return text;
   return text.slice(0, maxLen) + "\n... [truncated]";
 }
@@ -234,7 +235,7 @@ function truncate(text: string, maxLen: number): string {
 
 // Extract the last balanced {...} block, JSON.parse, validate the action
 // field is in the allowed set. Returns null on failure.
-function parseDecision<T extends { action: string }>(
+export function parseDecision<T extends { action: string }>(
   text: string,
   allowedActions: string[]
 ): T | null {
@@ -323,7 +324,7 @@ function updateWidget(ctx: ExtensionContext, state: UltramodeState): void {
 // The load-bearing function: calls complete() from @oh-my-pi/pi-ai.
 // This replaces the PRD's inaccessible session method (which does not exist on
 // ExtensionContext or ExtensionAPI).
-async function decide(
+export async function decide(
   ctx: ExtensionContext,
   promptText: string
 ): Promise<string> {
@@ -366,7 +367,7 @@ async function decide(
 
 // ─── Work Selection ───────────────────────────────────────────────────────────
 
-async function runSelection(
+export async function runSelection(
   pi: ExtensionAPI,
   ctx: ExtensionContext
 ): Promise<void> {
@@ -553,7 +554,7 @@ async function markBlocked(
   );
 }
 
-async function handleTurnEnd(
+export async function handleTurnEnd(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

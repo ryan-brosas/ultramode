@@ -1,0 +1,592 @@
+diff --git a/index.ts b/index.ts
+index c666009..93f1fde 100644
+--- a/index.ts
++++ b/index.ts
+@@ -128,7 +128,7 @@ export function createState(): UltramodeState {
+ // don't collide.
+ const sessionStates = new Map<string, UltramodeState>();
+ 
+-function getState(ctx: ExtensionContext): UltramodeState {
++export function getState(ctx: ExtensionContext): UltramodeState {
+   const key = ctx.sessionManager.getSessionId();
+   let state = sessionStates.get(key);
+   if (!state) {
+@@ -367,7 +367,7 @@ export async function decide(
+ 
+ // ─── Work Selection ───────────────────────────────────────────────────────────
+ 
+-async function runSelection(
++export async function runSelection(
+   pi: ExtensionAPI,
+   ctx: ExtensionContext
+ ): Promise<void> {
+@@ -554,7 +554,7 @@ async function markBlocked(
+   );
+ }
+ 
+-async function handleTurnEnd(
++export async function handleTurnEnd(
+   pi: ExtensionAPI,
+   ctx: ExtensionContext,
+   // eslint-disable-next-line @typescript-eslint/no-explicit-any
+diff --git a/test/error-paths.test.ts b/test/error-paths.test.ts
+index fd0ae1f..81b7bce 100644
+--- a/test/error-paths.test.ts
++++ b/test/error-paths.test.ts
+@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test";
+ import {
+   importIndex,
+   installPiAiMock,
++  mockExtensionAPI,
+   mockExtensionContext,
++  type MockExtensionAPI,
+ } from "./mocks.ts";
+ 
+ describe("decide error paths", () => {
+@@ -64,14 +66,212 @@ describe("decide error paths", () => {
+   });
+ });
+ 
+-describe("context helpers", () => {
+-  test("hasPendingMessages mock is callable when provided", () => {
+-    const ctx = mockExtensionContext({ hasPendingMessages: true });
++// ─── Risk 2: hasPendingMessages re-entrancy guard ────────────────────────────
++// The guard at index.ts:804 (inside the turn_end handler) must prevent
++// handleTurnEnd from running when there are pending messages. These tests
++// register the ultramode() factory, capture the turn_end handler via
++// mockExtensionAPI.onHandlers, and invoke it directly.
++
++describe("hasPendingMessages re-entrancy guard", () => {
++  test("turn_end handler skips handleTurnEnd when hasPendingMessages is true", async () => {
++    installPiAiMock();
++
++    const { default: ultramode, getState } = await importIndex(
++      "guard-pending-true"
++    );
++    const pi = mockExtensionAPI({
++      execResults: [{ stdout: "{}", code: 0 }],
++    });
++    const ctx = mockExtensionContext({
++      model: { provider: "test", id: "test-model" },
++      getApiKeyResult: "test-api-key",
++      hasPendingMessages: true,
++    });
+ 
+-    expect(typeof ctx.hasPendingMessages).toBe("function");
+-    expect(ctx.hasPendingMessages?.()).toBe(true);
++    // Register the extension — captures turn_end handler in onHandlers.
++    ultramode(pi);
++
++    // Activate the loop so mode === "on" (guard only acts when on).
++    const state = getState(ctx);
++    state.mode = "on";
++    state.beadId = "ultramode-guard";
++    state.phase = "planning";
++
++    // Invoke the captured turn_end handler.
++    const handler = (pi as unknown as MockExtensionAPI).onHandlers.get(
++      "turn_end"
++    );
++    expect(handler).toBeDefined();
++    await handler?.({ message: { content: "should be skipped" } }, ctx);
++
++    // handleTurnEnd should NOT have run: no bv triage exec call, no
++    // sendUserMessage, no decide invocation. The exec spy should have
++    // zero calls (handleTurnEnd calls pi.exec for bv triage).
++    const execCalls = (pi as unknown as MockExtensionAPI).exec.calls;
++    expect(execCalls).toHaveLength(0);
++
++    // State should be unchanged — no persistState, no retries.
++    const after = getState(ctx);
++    expect(after.retries).toBe(0);
++    expect(after.phase).toBe("planning");
+   });
+ 
++  test("turn_end handler proceeds to handleTurnEnd when hasPendingMessages is false", async () => {
++    // Mock decide() to return a stop decision so handleTurnEnd completes
++    // without side effects beyond the exec call for bv triage.
++    const stopJson = JSON.stringify({
++      action: "stop",
++      reasoning: "test stop",
++    });
++    installPiAiMock({
++      complete: async () => ({
++        content: [{ type: "text", text: stopJson }],
++      }),
++    });
++
++    const { default: ultramode, getState } = await importIndex(
++      "guard-pending-false"
++    );
++    const pi = mockExtensionAPI({
++      execResults: [{ stdout: "{}", code: 0 }],
++    });
++    const ctx = mockExtensionContext({
++      model: { provider: "test", id: "test-model" },
++      getApiKeyResult: "test-api-key",
++      hasPendingMessages: false,
++    });
++
++    ultramode(pi);
++
++    const state = getState(ctx);
++    state.mode = "on";
++    state.beadId = "ultramode-guard";
++    state.phase = "planning";
++
++    const handler = (pi as unknown as MockExtensionAPI).onHandlers.get(
++      "turn_end"
++    );
++    expect(handler).toBeDefined();
++    await handler?.({ message: { content: "should proceed" } }, ctx);
++
++    // handleTurnEnd should have run: at least one exec call for bv triage.
++    const execCalls = (pi as unknown as MockExtensionAPI).exec.calls;
++    expect(execCalls.length).toBeGreaterThanOrEqual(1);
++
++    // The stop decision should have idled the loop.
++    const after = getState(ctx);
++    expect(after.mode).toBe("idle");
++  });
++});
++
++// ─── Risk 4: br scheduler returns zero recommendations → br list fallback ─────
++// runSelection() must fall back to `br list` when `br scheduler` returns
++// zero recommendations. This exercises the actual fallback branch.
++
++describe("scheduler fallback to br list", () => {
++  test("runSelection falls back to br list when scheduler has no recommendations", async () => {
++    // Mock decide() to return a wait decision so runSelection completes
++    // without side effects beyond the exec calls.
++    const waitJson = JSON.stringify({
++      action: "wait",
++      reasoning: "no ready work",
++    });
++    installPiAiMock({
++      complete: async () => ({
++        content: [{ type: "text", text: waitJson }],
++      }),
++    });
++
++    const { runSelection, getState } = await importIndex("sched-fallback");
++    const pi = mockExtensionAPI({
++      execResults: [
++        // bv --robot-triage call
++        { stdout: "{}", code: 0 },
++        // br scheduler --json call (returns empty recommendations)
++        { stdout: '{"recommendations":[]}', code: 0 },
++        // br list fallback call (returns empty list)
++        { stdout: "[]", code: 0 },
++      ],
++    });
++    const ctx = mockExtensionContext({
++      model: { provider: "test", id: "test-model" },
++      getApiKeyResult: "test-api-key",
++    });
++
++    // Activate the loop so runSelection operates in mode "on".
++    const state = getState(ctx);
++    state.mode = "on";
++
++    await runSelection(pi, ctx);
++
++    // Verify the three exec calls were: bv triage, br scheduler, br list.
++    const execCalls = (pi as unknown as MockExtensionAPI).exec.calls;
++    expect(execCalls).toHaveLength(3);
++
++    // Call 0: bv triage
++    expect(execCalls[0][0]).toBe("bv");
++    expect(execCalls[0][1]).toContain("--robot-triage");
++
++    // Call 1: br scheduler
++    expect(execCalls[1][0]).toBe("br");
++    expect(execCalls[1][1][0]).toBe("scheduler");
++    expect(execCalls[1][1]).toContain("--json");
++
++    // Call 2: br list fallback
++    expect(execCalls[2][0]).toBe("br");
++    expect(execCalls[2][1][0]).toBe("list");
++    expect(execCalls[2][1]).toContain("--status");
++    expect(execCalls[2][1]).toContain("open");
++    expect(execCalls[2][1]).toContain("--json");
++
++    // The wait decision should have idled the loop.
++    const after = getState(ctx);
++    expect(after.mode).toBe("idle");
++  });
++
++  test("runSelection skips br list fallback when scheduler has recommendations", async () => {
++    const waitJson = JSON.stringify({
++      action: "wait",
++      reasoning: "has work but waiting",
++    });
++    installPiAiMock({
++      complete: async () => ({
++        content: [{ type: "text", text: waitJson }],
++      }),
++    });
++
++    const { runSelection, getState } = await importIndex("sched-no-fallback");
++    const pi = mockExtensionAPI({
++      execResults: [
++        // bv --robot-triage call
++        { stdout: "{}", code: 0 },
++        // br scheduler --json call (returns recommendations → no fallback)
++        { stdout: '{"recommendations":[{"id":"ultramode-x"}]}', code: 0 },
++      ],
++    });
++    const ctx = mockExtensionContext({
++      model: { provider: "test", id: "test-model" },
++      getApiKeyResult: "test-api-key",
++    });
++
++    const state = getState(ctx);
++    state.mode = "on";
++
++    await runSelection(pi, ctx);
++
++    // Only 2 exec calls: bv triage + br scheduler. No br list fallback.
++    const execCalls = (pi as unknown as MockExtensionAPI).exec.calls;
++    expect(execCalls).toHaveLength(2);
++
++    expect(execCalls[1][0]).toBe("br");
++    expect(execCalls[1][1][0]).toBe("scheduler");
++
++    const after = getState(ctx);
++    expect(after.mode).toBe("idle");
++  });
++});
++
++describe("context helpers", () => {
+   test("extractText reads string content", async () => {
+     installPiAiMock();
+     const { extractText } = await importIndex("extract-string");
+diff --git a/test/mocks.ts b/test/mocks.ts
+index b7c230d..c823db4 100644
+--- a/test/mocks.ts
++++ b/test/mocks.ts
+@@ -85,11 +85,28 @@ export interface MockAPIOverrides {
+   execResults?: Array<{ stdout: string; code: number }>;
+ }
+ 
+-export function mockExtensionAPI(overrides: MockAPIOverrides = {}): ExtensionAPI {
++export interface MockExtensionAPI {
++  exec: Spy<[string, string[]], Promise<{ stdout: string; code: number }>>;
++  sendUserMessage: Spy<[string, { deliverAs: "followUp" }], void>;
++  appendEntry: Spy<[string, unknown], void>;
++  registerCommand: Spy<
++    [
++      string,
++      { handler: (args: string, ctx: ExtensionCommandContext) => MaybePromise<void> }
++    ],
++    void
++  >;
++  on: Spy<[string, (...args: readonly unknown[]) => MaybePromise<unknown>], void>;
++  onHandlers: Map<string, (...args: readonly unknown[]) => MaybePromise<unknown>>;
++}
++
++export function mockExtensionAPI(overrides: MockAPIOverrides = {}): MockExtensionAPI {
+   let execCallIndex = 0;
+-  const api = {
++  const onHandlers = new Map<string, (...args: readonly unknown[]) => MaybePromise<unknown>>();
++  const api: MockExtensionAPI = {
+     exec: createSpy<[string, string[]], Promise<{ stdout: string; code: number }>>(
+-      async () => {
++      async (_cmd: string, args: string[]) => {
++        void args;
+         if (overrides.execResults && overrides.execResults.length > 0) {
+           const result = overrides.execResults[
+             Math.min(execCallIndex, overrides.execResults.length - 1)
+@@ -104,16 +121,22 @@ export function mockExtensionAPI(overrides: MockAPIOverrides = {}): ExtensionAPI
+       () => undefined
+     ),
+     appendEntry: createSpy<[string, unknown], void>(() => undefined),
+-    registerCommand: createSpy<[
+-      string,
+-      { handler: (args: string, ctx: ExtensionCommandContext) => MaybePromise<void> }
+-    ], void>(() => undefined),
++    registerCommand: createSpy<
++      [
++        string,
++        { handler: (args: string, ctx: ExtensionCommandContext) => MaybePromise<void> }
++      ],
++      void
++    >(() => undefined),
+     on: createSpy<[string, (...args: readonly unknown[]) => MaybePromise<unknown>], void>(
+-      () => undefined
++      (event: string, handler: (...args: readonly unknown[]) => MaybePromise<unknown>) => {
++        onHandlers.set(event, handler);
++      }
+     ),
++    onHandlers,
+   };
+   // Test boundary: the mock implements only members used by the extension tests.
+-  return api as unknown as ExtensionAPI;
++  return api as unknown as MockExtensionAPI;
+ }
+ 
+ interface PiAiMockOverrides {
+diff --git a/test/retry-logic.test.ts b/test/retry-logic.test.ts
+index 5a3d041..d87df19 100644
+--- a/test/retry-logic.test.ts
++++ b/test/retry-logic.test.ts
+@@ -1,7 +1,13 @@
+ import { beforeAll, describe, expect, test } from "bun:test";
+ import type * as IndexModule from "../index.ts";
+ import type { Phase } from "../index.ts";
+-import { importIndex, installPiAiMock } from "./mocks.ts";
++import {
++  importIndex,
++  installPiAiMock,
++  mockExtensionAPI,
++  mockExtensionContext,
++  type MockExtensionAPI,
++} from "./mocks.ts";
+ 
+ let indexModule: typeof IndexModule;
+ 
+@@ -19,7 +25,9 @@ beforeAll(async () => {
+   indexModule = await importIndex("retry-logic");
+ });
+ 
+-describe("retry logic invariants", () => {
++// ─── Constant invariants (sanity checks) ────────────────────────────────────
++
++describe("retry logic constants", () => {
+   test("retry command map points at the current phase command, not the next command", () => {
+     for (const phase of retryablePhases) {
+       const retryCommand = indexModule.COMMAND_FROM_PHASE[phase];
+@@ -49,25 +57,221 @@ describe("retry logic invariants", () => {
+     expect(indexModule.COMMAND_FROM_PHASE.shipping).toBe("/ship");
+     expect(indexModule.PHASE_WHITELIST.shipping).toBe("/verify");
+   });
++});
++
++// ─── Behavioral tests: exercise the actual retry branch ──────────────────────
++// These tests invoke handleTurnEnd with a mocked decide() returning a retry
++// decision, then assert on sendUserMessage / pi.exec / state mutations.
++// They would FAIL if the retry branch used PHASE_WHITELIST instead of
++// COMMAND_FROM_PHASE, or if the no-command case idled instead of resetting.
++
++describe("retry branch behavior via handleTurnEnd", () => {
++  test("re-injects COMMAND_FROM_PHASE command (not PHASE_WHITELIST) on retry", async () => {
++    const retryJson = JSON.stringify({
++      action: "retry",
++      reasoning: "test retry",
++    });
++
++    installPiAiMock({
++      complete: async () => ({
++        content: [{ type: "text", text: retryJson }],
++      }),
++    });
++
++    const { handleTurnEnd, getState, CONTROL_TYPE } = await importIndex(
++      "retry-command-dir"
++    );
++    const pi = mockExtensionAPI();
++    const ctx = mockExtensionContext({
++      model: { provider: "test", id: "test-model" },
++      getApiKeyResult: "test-api-key",
++    });
++
++    // Set state: mode on, bead claimed, in planning phase, 0 retries.
++    const state = getState(ctx);
++    state.mode = "on";
++    state.beadId = "ultramode-test";
++    state.phase = "planning";
++    state.retries = 0;
+ 
+-  test("retries below the cap take the retry branch", () => {
+-    const retries = indexModule.MAX_RETRIES - 1;
++    await handleTurnEnd(pi, ctx, { content: "assistant output" });
+ 
+-    expect(retries < indexModule.MAX_RETRIES).toBe(true);
++    // Retry should re-inject /plan (COMMAND_FROM_PHASE.planning),
++    // NOT /ship (PHASE_WHITELIST.planning).
++    const sendCalls = (pi as unknown as MockExtensionAPI).sendUserMessage.calls;
++    expect(sendCalls).toHaveLength(1);
++    expect(sendCalls[0][0]).toBe("/plan ultramode-test");
++    expect(sendCalls[0][1]).toEqual({ deliverAs: "followUp" });
++
++    // State: retries incremented, still on, same bead.
++    const after = getState(ctx);
++    expect(after.retries).toBe(1);
++    expect(after.mode).toBe("on");
++    expect(after.beadId).toBe("ultramode-test");
++    expect(after.phase).toBe("planning");
++    void CONTROL_TYPE;
+   });
+ 
+-  test("retries at the cap take the blocked branch", () => {
+-    const retries = indexModule.MAX_RETRIES;
++  test("retries increment up to MAX_RETRIES via handleTurnEnd", async () => {
++    const retryJson = JSON.stringify({
++      action: "retry",
++      reasoning: "retry increment",
++    });
++
++    installPiAiMock({
++      complete: async () => ({
++        content: [{ type: "text", text: retryJson }],
++      }),
++    });
++
++    const { handleTurnEnd, getState, MAX_RETRIES } = await importIndex(
++      "retry-increment"
++    );
++    const pi = mockExtensionAPI();
++    const ctx = mockExtensionContext({
++      model: { provider: "test", id: "test-model" },
++      getApiKeyResult: "test-api-key",
++    });
++
++    const state = getState(ctx);
++    state.mode = "on";
++    state.beadId = "ultramode-inc";
++    state.phase = "creating";
++    state.retries = 0;
+ 
+-    expect(retries < indexModule.MAX_RETRIES).toBe(false);
++    // First retry: 0 → 1
++    await handleTurnEnd(pi, ctx, { content: "output 1" });
++    expect(getState(ctx).retries).toBe(1);
++
++    // Second retry: 1 → 2 (still under cap)
++    await handleTurnEnd(pi, ctx, { content: "output 2" });
++    expect(getState(ctx).retries).toBe(2);
++
++    // Third retry: 2 → 3 (at cap, next call should trigger blocked branch)
++    expect(MAX_RETRIES).toBe(3);
+   });
+ 
+-  test("no-command retry case must reset instead of silently idling", () => {
+-    const currentCommand = indexModule.COMMAND_FROM_PHASE.selecting;
+-    const beadId = "ultramode-air";
+-    const canReinject = Boolean(currentCommand && beadId);
++  test("at MAX_RETRIES triggers blocked branch and resets to selection", async () => {
++    const retryJson = JSON.stringify({
++      action: "retry",
++      reasoning: "exhausted",
++    });
++
++    // Track br update calls for blocked status.
++    const brCalls: string[][] = [];
++    installPiAiMock({
++      complete: async () => ({
++        content: [{ type: "text", text: retryJson }],
++      }),
++    });
++
++    const { handleTurnEnd, getState, MAX_RETRIES } = await importIndex(
++      "retry-cap"
++    );
++    const pi = mockExtensionAPI({
++      execResults: [
++        // bv triage call in handleTurnEnd
++        { stdout: "{}", code: 0 },
++        // br update --status blocked call in markBlocked
++        { stdout: "{}", code: 0 },
++        // bv triage call in runSelection (reset path)
++        { stdout: "{}", code: 0 },
++        // br scheduler call in runSelection
++        { stdout: '{"recommendations":[]}', code: 0 },
++        // br list fallback in runSelection
++        { stdout: "[]", code: 0 },
++      ],
++    });
++    const ctx = mockExtensionContext({
++      model: { provider: "test", id: "test-model" },
++      getApiKeyResult: "test-api-key",
++    });
++
++    // Track all exec args to verify br update --status blocked fired.
++    const execSpy = (pi as unknown as MockExtensionAPI).exec;
++    const origImpl = execSpy;
++    const trackedExec = ((...args: [string, string[]]) => {
++      brCalls.push(args[1]);
++      return origImpl(...args);
++    }) as typeof origImpl;
++    (pi as unknown as MockExtensionAPI).exec = trackedExec;
++
++    const state = getState(ctx);
++    state.mode = "on";
++    state.beadId = "ultramode-blocked";
++    state.phase = "planning";
++    state.retries = MAX_RETRIES; // already at cap
++
++    await handleTurnEnd(pi, ctx, { content: "final output" });
++
++    // The blocked branch should have called br update --status blocked.
++    const blockedCall = brCalls.find(
++      (args) =>
++        args[0] === "update" &&
++        args.includes("--status") &&
++        args.includes("blocked")
++    );
++    expect(blockedCall).toBeDefined();
++    expect(blockedCall![1]).toBe("ultramode-blocked");
++
++    // State should reset to selection.
++    const after = getState(ctx);
++    expect(after.beadId).toBeNull();
++    expect(after.phase).toBe("selecting");
++    expect(after.retries).toBe(0);
++  });
++
++  test("no-command retry case resets to selection instead of silently idling", async () => {
++    const retryJson = JSON.stringify({
++      action: "retry",
++      reasoning: "no command",
++    });
++
++    installPiAiMock({
++      complete: async () => ({
++        content: [{ type: "text", text: retryJson }],
++      }),
++    });
++
++    const { handleTurnEnd, getState } = await importIndex("retry-no-cmd");
++    const pi = mockExtensionAPI({
++      execResults: [
++        // bv triage in handleTurnEnd
++        { stdout: "{}", code: 0 },
++        // bv triage in runSelection
++        { stdout: "{}", code: 0 },
++        // br scheduler in runSelection
++        { stdout: '{"recommendations":[]}', code: 0 },
++        // br list fallback in runSelection
++        { stdout: "[]", code: 0 },
++      ],
++    });
++    const ctx = mockExtensionContext({
++      model: { provider: "test", id: "test-model" },
++      getApiKeyResult: "test-api-key",
++    });
++
++    // Phase = selecting → COMMAND_FROM_PHASE.selecting is null → can't re-inject.
++    const state = getState(ctx);
++    state.mode = "on";
++    state.beadId = "ultramode-nocmd";
++    state.phase = "selecting";
++    state.retries = 0;
++
++    await handleTurnEnd(pi, ctx, { content: "output" });
++
++    // Should NOT have sent a retry message (no command to re-inject).
++    const sendCalls = (pi as unknown as MockExtensionAPI).sendUserMessage.calls;
++    // The only sendUserMessage call, if any, should be from runSelection
++    // (e.g. /create), not a retry of a selecting-phase command.
++    const retryCall = sendCalls.find(([cmd]) =>
++      cmd.startsWith("/select")
++    );
++    expect(retryCall).toBeUndefined();
+ 
+-    expect(canReinject).toBe(false);
+-    expect(currentCommand).toBeNull();
++    // State should have reset to selection (beadId cleared, retries 0).
++    const after = getState(ctx);
++    expect(after.retries).toBe(0);
++    expect(after.phase).toBe("selecting");
+   });
+ });

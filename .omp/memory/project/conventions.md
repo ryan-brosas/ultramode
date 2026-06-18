@@ -31,6 +31,15 @@ The extension is a single `index.ts` file exporting a default factory function `
 - Event handlers (`session_start`, `turn_end`, `tool_call`)
 - Command handler (`/ultramode` with on/off/status/continue subcommands)
 - Sequential phase enforcement: `proceed` validates `nextCommand` against `PHASE_WHITELIST[state.phase]`; retry uses `COMMAND_FROM_PHASE[state.phase]`
+- Test exports: `getState`, `runSelection`, `handleTurnEnd`, `parseDecision`, `reconstructState`, phase maps, `MAX_RETRIES`, `CONTROL_TYPE` exported as named exports for direct unit testing (no behavior change — visibility only)
+
+## Test Structure
+
+Tests use `bun:test` (built-in — no npm dependency). Test files live in `test/`:
+- `test/mocks.ts` — reusable mock factories (`createSpy`, `mockExtensionAPI`, `mockExtensionContext`, `mockSessionManager`, `installPiAiMock`, `importIndex`)
+- `test/*.test.ts` — focused unit tests per module (`parse-decision`, `reconstruct-state`, `phase-maps`, `retry-logic`, `error-paths`)
+- `test/run.sh` — shell runner: `bun test test/`
+- Run all: `bun test test/` or `bash test/run.sh`
 
 ## Git
 

@@ -27,14 +27,13 @@ No npm `dependencies` in `package.json` — both are resolved by the OMP runtime
 ## Verification Commands
 
 ```bash
-# Typecheck
+# Build (typecheck + emit)
 bun build index.ts --no-bundle
 
-# Lint
-# (no linter configured — index.ts is a single file)
-
-# Test
-# (no test framework — extension is verified via /ultramode status and end-to-end loop test)
+# Test (Bun built-in test runner)
+bun test test/
+# or via runner script:
+bash test/run.sh
 
 # Build
 # (no build step — index.ts is loaded directly by OMP)
@@ -61,5 +60,6 @@ br list --status open --status in_progress --json
 - **No `runEphemeralTurn`:** The method exists only on `AgentSession` (internal class), not on `ExtensionContext` or `ExtensionAPI`. Use `complete()` from `@oh-my-pi/pi-ai`.
 - **No `/close` injection:** The `PHASE_WHITELIST` maps `pr → null` (terminal). The loop stops at `/pr` and sets mode to `idle`. Never inject `/close` or `/merge`.
 - **`deliverAs: "followUp"`:** Phase commands are injected via `pi.sendUserMessage(cmd, { deliverAs: "followUp" })` to avoid re-entrancy deadlock in `turn_end` handlers.
+- **No compatibility shims:** Migrate every caller, leave no aliases or deprecated paths. Tests must exercise real code paths, not assert on constants.
 - **Token budget:** Keep each memory file under 2KB. Total memory context under 8KB.
 - **Verification gate:** Every bead must pass its verification commands before `/review` or `/pr`.

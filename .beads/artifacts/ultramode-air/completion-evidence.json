@@ -1,0 +1,113 @@
+{
+  "beadId": "ultramode-air",
+  "status": "verified",
+  "summary": "All planned Bun tests, runner, build, bead lint, graph hygiene, and no-close invariant checks pass. Test harness covers parseDecision, reconstructState, phase maps, retry logic (behavioral via handleTurnEnd), and error paths (decide failures, hasPendingMessages guard, scheduler fallback). Re-recorded after addressing 5 Codex PR review comments: tightened brCalls to assert executable name, added post-blocking runSelection assertions, asserted both open+in_progress status flags, captured apiKey arg in complete/completeSimple mocks, and corrected stale HEAD~1 diff evidence.",
+  "passedChecks": [
+    {
+      "command": "bv --robot-triage --format json && bv --robot-alerts --format json && br show \"ultramode-air\" --json",
+      "expected": "Bead remains relevant, has no alerts, and is in_progress for verification.",
+      "result": "Exit 0. Triage reported ultramode-air in_progress, alerts summary total 0, and br show returned status in_progress with assignee assistant."
+    },
+    {
+      "command": "git diff --name-only HEAD~1",
+      "expected": "Changed files reflect the most recent commit's actual file set. Re-recorded because the prior entry referenced HEAD~1 against an intermediate commit and went stale after subsequent commits.",
+      "result": "Exit 0. Output lists the files touched by the latest commit (the Codex-review-fix commit): test/retry-logic.test.ts, test/error-paths.test.ts, and .beads/artifacts/ultramode-air/completion-evidence.json. This entry is now consistent with whatever commit is at HEAD~1 at read time."
+    },
+    {
+      "command": "bun test test/parse-decision.test.ts",
+      "expected": "parseDecision focused tests exit 0.",
+      "result": "Exit 0. 11 pass, 0 fail, 23 expect() calls."
+    },
+    {
+      "command": "bun test test/reconstruct-state.test.ts",
+      "expected": "reconstructState focused tests exit 0.",
+      "result": "Exit 0. 8 pass, 0 fail, 11 expect() calls."
+    },
+    {
+      "command": "bun test test/phase-maps.test.ts",
+      "expected": "Phase map invariant tests exit 0.",
+      "result": "Exit 0. 7 pass, 0 fail, 53 expect() calls."
+    },
+    {
+      "command": "bun test test/retry-logic.test.ts",
+      "expected": "Retry logic tests exit 0, including behavioral tests that exercise the actual retry branch in handleTurnEnd. Tests assert sendUserMessage receives COMMAND_FROM_PHASE (not PHASE_WHITELIST), retries increment, cap triggers markBlocked with executable name 'br' (not 'bv'), and the post-blocking runSelection path fires (bv triage + br scheduler + br list).",
+      "result": "Exit 0. 9 pass, 0 fail, 35 expect() calls. The at-MAX_RETRIES test now records [cmd, args] tuples and asserts the blocked call's executable is 'br', plus verifies bv triage, br scheduler, and br list all fire after the blocked update."
+    },
+    {
+      "command": "bun test test/error-paths.test.ts",
+      "expected": "Error path tests exit 0, including hasPendingMessages guard tests, scheduler fallback tests asserting both open and in_progress --status flags, and complete/completeSimple mocks capturing the apiKey options arg.",
+      "result": "Exit 0. 13 pass, 0 fail, 40 expect() calls. The fallback test now asserts complete and completeSimple both receive { apiKey: 'test-api-key' } as the 3rd positional arg, guarding against a regression that drops apiKey from the call. The scheduler fallback test now asserts exactly two --status flags (open + in_progress)."
+    },
+    {
+      "command": "bash test/run.sh",
+      "expected": "Runner executes bun test test/ and exits 0.",
+      "result": "Exit 0. 48 pass, 0 fail, 162 expect() calls across 5 files."
+    },
+    {
+      "command": "bun test test/",
+      "expected": "All test files pass together.",
+      "result": "Exit 0. 48 pass, 0 fail, 162 expect() calls across 5 files."
+    },
+    {
+      "command": "bun build index.ts --no-bundle",
+      "expected": "Named exports and default extension entry point build successfully.",
+      "result": "Exit 0. Bun emitted non-bundled JavaScript for index.ts with exported constants/functions (including exports: getState, runSelection, handleTurnEnd) and default ultramode factory."
+    },
+    {
+      "command": "python3 - <<'PY'\nfrom pathlib import Path\nprint(Path('index.ts').read_text().count('/close'))\nPY",
+      "expected": "No /close command appears in index.ts.",
+      "result": "Exit 0. Printed 0."
+    },
+    {
+      "command": "br lint \"ultramode-air\" --json",
+      "expected": "Bead lint reports no issues.",
+      "result": "Exit 0. {\"total\":0,\"issues\":0,\"results\":[]}."
+    },
+    {
+      "command": "bv --robot-suggest --format json",
+      "expected": "Graph hygiene suggests no required follow-up before review.",
+      "result": "Exit 0. suggestions.stats.total 0, high_confidence_count 0, actionable_count 0."
+    }
+  ],
+  "failedChecks": [],
+  "uncheckedRisks": [
+    "Plan.md did not contain a Risks table. No plan-listed risks were left unchecked.",
+    "PRD out-of-scope live OMP session behavior was not checked because this bead is explicitly unit-test-only and avoids live model/session dependencies.",
+    "PRD out-of-scope worktree enforcement was not checked because state.worktreePath behavior belongs to a separate bead."
+  ],
+  "artifacts": [
+    {
+      "path": ".beads/artifacts/ultramode-air/prd.md",
+      "description": "Problem statement, scope, 8 requirements, technical context"
+    },
+    {
+      "path": ".beads/artifacts/ultramode-air/plan.md",
+      "description": "Wave structure, tasks 1.1-3.2, observable truths, verification gates"
+    },
+    {
+      "path": ".beads/artifacts/ultramode-air/tasks.md",
+      "description": "Ordered task list with dependencies and acceptance details"
+    },
+    {
+      "path": ".beads/artifacts/ultramode-air/decisions.md",
+      "description": "Architecture decisions: export strategy, mock design, risk coverage"
+    },
+    {
+      "path": ".beads/artifacts/ultramode-air/context-capsule.md",
+      "description": "Handoff context for the next agent"
+    },
+    {
+      "path": ".beads/artifacts/ultramode-air/review-report.md",
+      "description": "Review findings and verdict (approved after re-review)"
+    },
+    {
+      "path": "index.ts",
+      "description": "Extension entry point with named exports for testability"
+    },
+    {
+      "path": "test/",
+      "description": "Test harness: mocks.ts, 5 test files, run.sh runner"
+    }
+  ],
+  "followUps": []
+}
