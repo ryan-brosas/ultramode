@@ -149,6 +149,9 @@ describe("retry branch behavior via handleTurnEnd", () => {
     await handleTurnEnd(pi, ctx, { content: "output 1" });
     expect(getState(ctx).retries).toBe(1);
 
+    // Reset cooldown — simulate the next turn arriving after the cooldown window
+    getState(ctx).lastDecisionTime = null;
+
     // Second retry: 1 → 2 (still under cap)
     await handleTurnEnd(pi, ctx, { content: "output 2" });
     expect(getState(ctx).retries).toBe(2);

@@ -35,42 +35,38 @@ describe("decide error paths", () => {
     await expect(decide(ctx, "test prompt")).rejects.toThrow("no API key");
   });
 
-  test("falls back to completeSimple when complete throws and passes apiKey to both", async () => {
-    // Capture the options arg (3rd positional) passed to complete/completeSimple.
-    // decide() calls `complete(model, context, { apiKey })` — a regression that
-    // drops apiKey from the call would still pass the prior tests because both
-    // mocks ignored their arguments. Asserting apiKey wiring guards the risk.
+  test("complete() errors propagate directly — no completeSimple fallback", async () => {
+    // decide() previously fell back to completeSimple() on any non-timeout
+    // error from complete(). This caused a second doomed API call on auth
+    // errors, rate limits, JSON parse errors, etc. Now complete() errors
+    // propagate directly to the caller's retry logic.
     const completeCalls: { apiKey?: string }[] = [];
-    const completeSimpleCalls: { apiKey?: string }[] = [];
+    const completeSimpleCalls: unknown[] = [];
 
     installPiAiMock({
       complete: async (_model: unknown, _context: unknown, opts?: { apiKey?: string }) => {
         completeCalls.push(opts ?? {});
         throw new Error("stream provider failed");
       },
-      completeSimple: async (_model: unknown, _context: unknown, opts?: { apiKey?: string }) => {
-        completeSimpleCalls.push(opts ?? {});
-        return {
-          content: [{ type: "text", text: "fallback text" }],
-        };
+      completeSimple: async () => {
+        completeSimpleCalls.push("should not be called");
+        return { content: [{ type: "text", text: "fallback text" }] };
       },
     });
 
-    const { decide } = await importIndex("fallback");
+    const { decide } = await importIndex("no-fallback");
     const ctx = mockExtensionContext({
       model: { provider: "test", id: "test-model" },
       getApiKeyResult: "test-api-key",
     });
 
-    const result = await decide(ctx, "test prompt");
-
-    expect(result).toBe("fallback text");
-    // complete was attempted first and received the resolved API key.
+    // The error from complete() should propagate, not be swallowed.
+    await expect(decide(ctx, "test prompt")).rejects.toThrow("stream provider failed");
+    // complete was attempted once and received the resolved API key.
     expect(completeCalls).toHaveLength(1);
     expect(completeCalls[0].apiKey).toBe("test-api-key");
-    // completeSimple was the fallback and ALSO received the resolved API key.
-    expect(completeSimpleCalls).toHaveLength(1);
-    expect(completeSimpleCalls[0].apiKey).toBe("test-api-key");
+    // completeSimple was NOT called — no fallback.
+    expect(completeSimpleCalls).toHaveLength(0);
   });
 });
 
@@ -387,31 +383,27 @@ describe("decide timeout", () => {
     expect(result).toBe("fast decision response");
   });
 
-  test("completeSimple fallback receives the signal", async () => {
-    const simpleCalls: { signal?: AbortSignal }[] = [];
-    installPiAiMock({
-      complete: async () => { throw new Error("stream failed"); },
-      completeSimple: async (_m: unknown, _c: unknown, opts?: { signal?: AbortSignal }) => {
-        simpleCalls.push(opts ?? {});
-        return { content: [{ type: "text", text: "fallback" }] };
-      },
-    });
-    const { decide } = await importIndex("timeout-fallback-signal");
-    const ctx = mockExtensionContext();
-    const result = await decide(ctx, "prompt", 5000);
-    expect(result).toBe("fallback");
-    expect(simpleCalls[0].signal).toBeInstanceOf(AbortSignal);
-    expect(simpleCalls[0].signal!.aborted).toBe(false);
-  });
-
-  test("timeout during completeSimple fallback also rejects", async () => {
+  test("complete() errors propagate directly without completeSimple fallback", async () => {
+    // After removing the completeSimple fallback, a non-timeout error from
+    // complete() must propagate immediately — no second doomed API call.
     installPiAiMock({
       complete: async () => { throw new Error("stream failed"); },
       completeSimple: () => new Promise<never>(() => {}),
     });
-    const { decide } = await importIndex("timeout-fallback-also");
+    const { decide } = await importIndex("timeout-no-fallback");
     const ctx = mockExtensionContext();
-    await expect(decide(ctx, "prompt", 50)).rejects.toThrow("timed out");
+    await expect(decide(ctx, "prompt", 5000)).rejects.toThrow("stream failed");
+  });
+
+  test("complete() error during timeout window rejects with the error, not timeout", async () => {
+    // If complete() throws before the timeout fires, the error propagates
+    // immediately — the timeout doesn't mask the original error.
+    installPiAiMock({
+      complete: async () => { throw new Error("auth failed: 401"); },
+    });
+    const { decide } = await importIndex("timeout-error-before-timeout");
+    const ctx = mockExtensionContext();
+    await expect(decide(ctx, "prompt", 5000)).rejects.toThrow("auth failed: 401");
   });
 
   test("no-model error still throws (regression)", async () => {

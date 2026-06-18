@@ -6,7 +6,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
-import { complete, completeSimple } from "@oh-my-pi/pi-ai";
+import { complete } from "@oh-my-pi/pi-ai";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -52,6 +52,11 @@ export interface UltramodeState {
    * the merge watcher polls GitHub for merge status and auto-continues
    * when the PR is merged. */
   prUrl: string | null;
+  /** Timestamp (Date.now()) of the last decide() call. Used to rate-limit
+   * decision calls — if handleTurnEnd fires within DECISION_COOLDOWN_MS of
+   * the last decision, skip it. Prevents rapid-fire LLM calls when the
+   * agent produces multiple completed turns in quick succession. */
+  lastDecisionTime: number | null;
 }
 
 export interface SelectionDecision {
@@ -144,7 +149,7 @@ export const COMMAND_FROM_PHASE: Record<Phase, string | null> = {
 
 export const MAX_RETRIES = 3;
 export const DECISION_TIMEOUT_MS = 300_000; // 5 minutes — reasoning models like GLM-5.2 need time to think
-
+export const DECISION_COOLDOWN_MS = 60_000; // 1 minute between decide() calls — prevents rapid-fire LLM calls
 
 // ─── State Helpers ───────────────────────────────────────────────────────────
 
@@ -160,6 +165,7 @@ export function createState(): UltramodeState {
     lastInjectedCommand: null,
     retryFeedback: null,
     prUrl: null,
+    lastDecisionTime: null,
   };
 }
 
@@ -193,9 +199,19 @@ function persistState(
 ): void {
   try {
     pi.appendEntry(CONTROL_TYPE, { ...state });
-  } catch {
-    // Journal write failure — in-memory state is still correct.
-    // Next reconstructState will use the last successful write.
+  } catch (err) {
+    // Journal write failure — in-memory state is still correct, but the
+    // journal is now stale. Surface this so the user knows persistence
+    // failed and a session restart may lose recent state changes.
+    const msg = err instanceof Error ? err.message : String(err);
+    try {
+      ctx.ui.notify(
+        `ultramode: state persistence failed — ${msg}. In-memory state is correct but may not survive a session restart.`,
+        "warning"
+      );
+    } catch {
+      // ui.notify unavailable — nothing we can do
+    }
   }
 }
 
@@ -298,6 +314,9 @@ export function reconstructState(ctx: ExtensionContext): UltramodeState {
           typeof candidate.prUrl === "string"
             ? candidate.prUrl
             : null,
+        // Reset cooldown on session restart — a stale timestamp from a
+        // previous session shouldn't block the first decision.
+        lastDecisionTime: null,
       };
     }
     return reconstructed;
@@ -475,6 +494,17 @@ interface VerificationEvidence {
 }
 
 /**
+ * Phases that need expensive subprocess calls (bun test, bun build, git diff).
+ * During brainstorming/creating/planning, these checks are pure waste —
+ * there's no code to test or build yet, and no committed diff to review.
+ * Running them on every completed turn in those phases burns the server.
+ * Only shipping→verifying transitions produce real code that needs checking.
+ */
+export function shouldRunHeavyChecks(phase: Phase): boolean {
+  return phase === "shipping" || phase === "verifying";
+}
+
+/**
  * Gather real verification evidence for the LLM decision.
  * Instead of just checking file existence, this:
  * - Runs `git diff --stat` to see what changed
@@ -499,56 +529,62 @@ async function gatherVerificationEvidence(
     codebaseContext: "",
   };
 
-  // Git diff — what changed?
-  try {
-    const diffResult = await pi.exec("git", [
-      "diff", "--stat", "HEAD~1",
-    ]);
-    if (diffResult.code === 0) {
-      evidence.gitDiff = truncate(diffResult.stdout, 1500);
+  // Heavy checks: git diff, git status, bun test, bun build. These spawn
+  // subprocesses with up to 60s timeouts. During brainstorming/creating/
+  // planning there's no code to test — skip them entirely to avoid burning
+  // the server on every completed turn.
+  if (shouldRunHeavyChecks(phase)) {
+    // Git diff — what changed?
+    try {
+      const diffResult = await pi.exec("git", [
+        "diff", "--stat", "HEAD~1",
+      ]);
+      if (diffResult.code === 0) {
+        evidence.gitDiff = truncate(diffResult.stdout, 1500);
+      }
+    } catch {
+      // no commits yet, or not a git repo — skip
     }
-  } catch {
-    // no commits yet, or not a git repo — skip
-  }
 
-  // Git status — uncommitted changes
-  try {
-    const statusResult = await pi.exec("git", ["status", "--short"]);
-    if (statusResult.code === 0) {
-      evidence.gitStatus = truncate(statusResult.stdout, 500) || "(clean)";
+    // Git status — uncommitted changes
+    try {
+      const statusResult = await pi.exec("git", ["status", "--short"]);
+      if (statusResult.code === 0) {
+        evidence.gitStatus = truncate(statusResult.stdout, 500) || "(clean)";
+      }
+    } catch {
+      // skip
     }
-  } catch {
-    // skip
-  }
 
-  // Tests — run bun run check (or bun test test/ fallback)
-  try {
-    const testResult = await pi.exec("bun", ["test", "test/"], {
-      timeout: 60_000,
-    });
-    const testOutput = truncate(testResult.stdout + "\n" + testResult.stderr, 800);
-    evidence.testResult = { exitCode: testResult.code, output: testOutput };
-  } catch {
-    // tests not available — skip
-  }
+    // Tests — run bun test test/ and capture exit code + output
+    try {
+      const testResult = await pi.exec("bun", ["test", "test/"], {
+        timeout: 60_000,
+      });
+      const testOutput = truncate(testResult.stdout + "\n" + testResult.stderr, 800);
+      evidence.testResult = { exitCode: testResult.code, output: testOutput };
+    } catch {
+      // tests not available — skip
+    }
 
-  // Build — run bun build
-  try {
-    const buildResult = await pi.exec(
-      "bun",
-      [
-        "build", "index.ts", "--target", "bun",
-        "--external", "@oh-my-pi/pi-ai",
-        "--external", "@oh-my-pi/pi-coding-agent",
-      ],
-      { timeout: 30_000 }
-    );
-    evidence.buildResult = {
-      exitCode: buildResult.code,
-      output: truncate(buildResult.stderr, 500),
-    };
-  } catch {
-    // build not available — skip
+    // Build — run bun build
+    try {
+      const buildResult = await pi.exec(
+        "bun",
+        [
+          "build", "index.ts", "--target", "bun",
+          "--external", "@oh-my-pi/pi-ai",
+          "--external", "@oh-my-pi/pi-coding-agent",
+        ],
+        { timeout: 30_000 }
+      );
+      evidence.buildResult = {
+        exitCode: buildResult.code,
+        output: truncate(buildResult.stderr, 500),
+      };
+    } catch {
+      // build not available — skip
+    }
   }
 
   // Read the phase-relevant artifact content so the LLM can actually
@@ -766,21 +802,7 @@ export async function decide(
   });
 
   async function callLLM(): Promise<AssistantMessage> {
-    try {
-      return await complete(model, context, { apiKey, signal });
-    } catch (err) {
-      if (signal.aborted) throw err; // timeout already fired — don't retry
-      // Only fall back to completeSimple for provider-specific API shape
-      // errors (e.g., model doesn't support the complete() signature).
-      // Auth errors (401/403), rate limits (429), network errors, and
-      // server errors (5xx) will also fail with completeSimple using the
-      // same apiKey — retrying wastes up to 300s on a doomed call.
-      const msg = err instanceof Error ? err.message : String(err);
-      const isHttpError = /(?:401|403|429|5\d{2})\b/.test(msg) ||
-        /auth|api key|rate.?limit|forbidden|unauthorized|ECONNREFUSED|ETIMEDOUT|ENOTFOUND/i.test(msg);
-      if (isHttpError) throw err;
-      return await completeSimple(model, context, { apiKey, signal });
-    }
+    return await complete(model, context, { apiKey, signal });
   }
 
   try {
@@ -1256,6 +1278,7 @@ function startMergeWatcher(
         latest.retries = 0;
         latest.lastDecision = null;
         latest.lastInjectedCommand = null;
+        latest.lastDecisionTime = null;
         persistState(pi, ctx, latest);
         updateWidget(ctx, latest);
         await runSelection(pi, ctx);
@@ -1303,6 +1326,17 @@ export async function handleTurnEnd(
   // second turn_end must not start a parallel evidence-gathering + LLM call.
   const sessionId = ctx.sessionManager.getSessionId();
   if (turnEndInProgress.has(sessionId)) return;
+  // Cooldown: if the last decide() call was less than DECISION_COOLDOWN_MS
+  // ago, skip this turn. Prevents rapid-fire LLM calls when the agent
+  // produces multiple completed turns in quick succession. The
+  // turnEndInProgress guard handles in-flight dedup; this handles the
+  // window between one decision completing and the next turn arriving.
+  if (
+    state.lastDecisionTime !== null &&
+    Date.now() - state.lastDecisionTime < DECISION_COOLDOWN_MS
+  ) {
+    return;
+  }
   turnEndInProgress.add(sessionId);
   try {
 
@@ -1344,6 +1378,7 @@ export async function handleTurnEnd(
   // A single network blip or rate limit should not permanently stop the loop.
   let decisionText: string;
   try {
+    state.lastDecisionTime = Date.now();
     decisionText = await decide(ctx, prompt);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -1588,8 +1623,18 @@ export default function ultramode(pi: ExtensionAPI): void {
     }
 
     if (state.mode === "on") {
-      // Fire-and-forget — don't block session start
-      void runSelection(pi, ctx);
+      // Fire-and-forget — don't block session start. But catch errors so
+      // a rejected sendUserMessage or persistState doesn't become an
+      // unhandled rejection that crashes the extension.
+      void runSelection(pi, ctx).catch((err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        ctx.ui.notify(`ultramode: session_start selection failed — ${msg}`, "error");
+        const errState = getState(ctx);
+        errState.mode = "idle";
+        errState.lastDecision = `session_start error: ${msg}`;
+        persistState(pi, ctx, errState);
+        updateWidget(ctx, errState);
+      });
     }
   });
 
@@ -1754,6 +1799,7 @@ export default function ultramode(pi: ExtensionAPI): void {
           state.beadId = null;
           state.lastInjectedCommand = null;
           state.retryFeedback = null;
+          state.lastDecisionTime = null;
           persistState(pi, ctx, state);
           updateWidget(ctx, state);
           ctx.ui.notify("ultramode: autonomous loop deactivated", "info");
@@ -1786,8 +1832,8 @@ export default function ultramode(pi: ExtensionAPI): void {
           state.phase = "selecting";
           state.retries = 0;
           state.lastDecision = null;
-          state.lastInjectedCommand = null;
           state.retryFeedback = null;
+          state.lastDecisionTime = null;
           persistState(pi, ctx, state);
           updateWidget(ctx, state);
           ctx.ui.notify(
