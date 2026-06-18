@@ -20,7 +20,7 @@ A standalone OMP extension package that drives the beads workflow (`/create` →
 ## Current Phase
 
 - **Status:** active
-- **Milestone:** `ultramode-aqr` complete — live session e2e test verified 11/12 requirements (extension loads, autonomous loop fires, state persists + survives restart, retry path to retries=2, no /close injected). PR #1 merged.
-- **Next:** Brainstorm follow-up beads — full 3-retry cap + markBlocked live test, worktree enforcement, LLM call timeout, README + install docs
+- **Milestone:** `ultramode-eqa` complete — LLM call timeout added to `decide()` via `Promise.race` + `AbortController` + `signal` (defense-in-depth). 57/57 tests pass, 2 review passes (11 agents, 0 bugs), PR #2 merged. Previous: `ultramode-aqr` (e2e test, PR #1).
+- **Next:** Brainstorm follow-up beads — full 3-retry cap + markBlocked live test, worktree enforcement, README + install docs
 
 Update this section after every milestone. An agent reading this must understand, within 3 seconds, what the project is doing right now.
