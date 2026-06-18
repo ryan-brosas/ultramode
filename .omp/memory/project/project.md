@@ -20,7 +20,7 @@ A standalone OMP extension package that drives the beads workflow (`/create` →
 ## Current Phase
 
 - **Status:** active
-- **Milestone:** `ultramode-air` complete — test harness added (48 tests, 5 risk paths covered), PR #1 open awaiting merge
-- **Next:** Merge PR #1, then brainstorm follow-up beads — live OMP session end-to-end test, worktree enforcement
+- **Milestone:** `ultramode-aqr` complete — live session e2e test verified 11/12 requirements (extension loads, autonomous loop fires, state persists + survives restart, retry path to retries=2, no /close injected). PR #1 merged.
+- **Next:** Brainstorm follow-up beads — full 3-retry cap + markBlocked live test, worktree enforcement, LLM call timeout, README + install docs
 
 Update this section after every milestone. An agent reading this must understand, within 3 seconds, what the project is doing right now.
