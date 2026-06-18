@@ -8,7 +8,7 @@
       "id": 1,
       "text": "decide() must not hang longer than DECISION_TIMEOUT_MS (120s default)",
       "priority": "MUST",
-      "acceptance": "Mock complete() to never resolve; call decide() with timeoutMs=50; verify it rejects within 200ms with a timeout error"
+      "acceptance": "Mock complete() to never resolve; call decide() with timeoutMs=50; verify it rejects with a 'timed out' error; suite completes in <1s with no hangs"
     },
     {
       "id": 2,

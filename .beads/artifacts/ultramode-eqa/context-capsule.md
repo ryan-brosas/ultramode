@@ -19,7 +19,7 @@ Add a 120-second timeout to the `decide()` function in `index.ts` using `AbortCo
 3. **MUST NOT add npm dependencies** — `AbortController`, `setTimeout`, `clearTimeout` are all runtime globals. No imports needed.
 4. **MUST NOT change the `complete()` → `completeSimple()` fallback logic** — The fallback only changes to: (a) pass `signal`, and (b) skip fallback when the signal is already aborted (timeout fired during `complete()`).
 5. **MUST use `finally { clearTimeout(timer) }`** — Not manual `clearTimeout` at each exit point. The `finally` block is the idiomatic cleanup pattern.
-6. **MUST NOT use `Promise.race`** — The native `signal` parameter on `complete()`/`completeSimple()` cancels the underlying HTTP request. `Promise.race` would leave the HTTP connection open.
+6. **Use `AbortController` + `signal` AND `Promise.race` together (defense-in-depth)** — The native `signal` parameter on `complete()`/`completeSimple()` cancels the underlying HTTP request for providers that respect it. `Promise.race` guarantees `decide()` returns on timeout regardless of provider behavior. Both layers are needed: signal-only is untestable (mocks ignore abort signals) and hangs if a provider ignores the signal. See decisions.md Decision #1 and Rejected Alternative #1 (overturned during /ship).
 7. **MUST NOT use env vars or config files** — `DECISION_TIMEOUT_MS` is a hardcoded constant. Configurability is YAGNI.
 8. **MUST pass all existing tests** — 48+ existing tests must pass unchanged. The `timeoutMs` parameter is backward-compatible (optional with default).
 9. **SHOULD keep the timeout at 120s** — 120s is generous for a JSON decision prompt. Shorter risks false positives on slow models. Longer means the loop appears stuck.

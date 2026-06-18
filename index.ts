@@ -108,6 +108,7 @@ export const COMMAND_FROM_PHASE: Record<Phase, string | null> = {
 };
 
 export const MAX_RETRIES = 3;
+export const DECISION_TIMEOUT_MS = 120_000; // 2 minutes — hung LLM recovery
 
 // ─── State Helpers ───────────────────────────────────────────────────────────
 
@@ -326,7 +327,8 @@ function updateWidget(ctx: ExtensionContext, state: UltramodeState): void {
 // ExtensionContext or ExtensionAPI).
 export async function decide(
   ctx: ExtensionContext,
-  promptText: string
+  promptText: string,
+  timeoutMs: number = DECISION_TIMEOUT_MS
 ): Promise<string> {
   const model = ctx.model;
   if (!model) throw new Error("ultramode: no active model on session");
@@ -350,19 +352,40 @@ export async function decide(
     ],
   };
 
-  let result: AssistantMessage;
-  try {
-    result = await complete(model, context, { apiKey });
-  } catch (err) {
-    // Fallback for providers that require ApiKeyResolver instead of static string
-    result = await completeSimple(model, context, { apiKey });
+  const controller = new AbortController();
+  const signal = controller.signal;
+
+  // Race the LLM call against an explicit timeout. The abort signal cancels
+  // the underlying HTTP request in production (defense-in-depth), but we can't
+  // rely on the provider honoring it — Promise.race guarantees decide()
+  // returns even if the mock or a misbehaving provider ignores the signal.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error(`ultramode: LLM decision timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+
+  async function callLLM(): Promise<AssistantMessage> {
+    try {
+      return await complete(model, context, { apiKey, signal });
+    } catch (err) {
+      if (signal.aborted) throw err; // timeout already fired — don't retry
+      return await completeSimple(model, context, { apiKey, signal });
+    }
   }
 
-  const text = result.content
-    .filter((b): b is TextContent => b.type === "text")
-    .map((b) => b.text)
-    .join("");
-  return text;
+  try {
+    const result = await Promise.race([callLLM(), timeout]);
+    const text = result.content
+      .filter((b): b is TextContent => b.type === "text")
+      .map((b) => b.text)
+      .join("");
+    return text;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 // ─── Work Selection ───────────────────────────────────────────────────────────

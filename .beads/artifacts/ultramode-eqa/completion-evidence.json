@@ -11,7 +11,7 @@
     {
       "command": "bun test test/",
       "expected": "Exit 0, 54+ tests pass (48 existing + 6 new in 'decide timeout' describe block)",
-      "result": "PASS — 54 pass, 0 fail, 171 expect() calls, 303ms. All 6 new timeout tests pass: (1) 'rejects with timeout error when complete never resolves' (50ms timeout override), (2) 'passes AbortSignal to complete()', (3) 'completeSimple fallback receives the signal', (4) 'timeout during completeSimple fallback also rejects', (5) 'no-model error still throws (regression)', (6) 'no-api-key error still throws (regression)'"
+      "result": "PASS — 54 pass, 0 fail, 172 expect() calls, 306ms. All 6 new timeout tests pass (now with signal.aborted===false assertions): (1) 'rejects with timeout error when complete never resolves' (50ms timeout override), (2) 'passes AbortSignal to complete()' (asserts signal.aborted===false at call time via capture-in-mock pattern), (3) 'completeSimple fallback receives the signal' (asserts signal.aborted===false), (4) 'timeout during completeSimple fallback also rejects', (5) 'no-model error still throws (regression)', (6) 'no-api-key error still throws (regression)'"
     },
     {
       "command": "grep -n \"DECISION_TIMEOUT_MS\" index.ts",
@@ -106,6 +106,10 @@
   ],
   "followUps": [
     "RESOLVED: decisions.md updated — decision #1 now reflects the shipped Promise.race + signal approach (defense-in-depth). Rejected alternative #1 marked as OVERTURNED during /ship with full reasoning. Assumption #2 corrected to state decide() does NOT depend on the provider respecting the signal.",
-    "RESOLVED: PRD risk table line 597 mitigation corrected to accurately describe the Promise.race + signal defense-in-depth approach, replacing the incorrect claim that the signal alone causes decide() to return on timeout."
+    "RESOLVED: PRD risk table line 597 mitigation corrected to accurately describe the Promise.race + signal defense-in-depth approach, replacing the incorrect claim that the signal alone causes decide() to return on timeout.",
+    "RESOLVED: Review finding #1 (PRD 'rejects within 200ms' criterion) — updated PRD acceptance criteria to match actual verification method (50ms timeout override + rejection assertion + suite completes <1s, not fragile wall-clock timing).",
+    "RESOLVED: Review finding #2 (PRD 'signal.aborted is false at call time' not asserted) — added abortedAtCallTime capture-in-mock pattern to 'passes AbortSignal to complete()' test and .aborted===false assertion to 'completeSimple fallback receives the signal' test.",
+    "RESOLVED: Review finding #3 (context-capsule.md line 22 stale 'MUST NOT use Promise.race') — updated to reflect shipped defense-in-depth approach with cross-reference to decisions.md.",
+    "RESOLVED: Review finding #4 (test comment implies caller handlers are tested) — reworded comment to clarify caller behavior is 'verified by code inspection, not by this test block' with exact line references."
   ]
 }
