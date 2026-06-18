@@ -1023,18 +1023,20 @@ export async function handleTurnEnd(
   } else if (decision.action === "stop") {
     if (state.phase === "pr") {
       ctx.ui.notify(
-        "ultramode: PR created — waiting for human merge. Run /ultramode continue after merge.",
+        "ultramode: PR created — worktree preserved for merge. Run /ultramode continue after merge.",
         "info"
       );
+      // Do NOT remove worktree — the PR branch lives there until merged.
+      // /ultramode continue cleans it up after the human merges.
     } else {
       ctx.ui.notify(
         `ultramode: stopping — ${decision.reasoning}`,
         "info"
       );
+      // Stopped before reaching /pr — no PR to merge, safe to clean up.
+      await removeWorktree(pi, ctx, state.worktreePath);
+      state.worktreePath = null;
     }
-    // Clean up worktree when stopping (bead done or stopped)
-    await removeWorktree(pi, ctx, state.worktreePath);
-    state.worktreePath = null;
     state.mode = "idle";
     persistState(pi, ctx, state);
     updateWidget(ctx, state);
@@ -1190,11 +1192,16 @@ export default function ultramode(pi: ExtensionAPI): void {
           break;
         }
         case "continue": {
+          // Clean up the previous bead's worktree — the user ran this
+          // because they merged the PR, so the branch is now merged.
+          await removeWorktree(pi, ctx, state.worktreePath);
+          state.worktreePath = null;
           state.mode = "on";
           state.beadId = null;
           state.phase = "selecting";
           state.retries = 0;
           state.lastDecision = null;
+          state.lastInjectedCommand = null;
           persistState(pi, ctx, state);
           updateWidget(ctx, state);
           ctx.ui.notify(
