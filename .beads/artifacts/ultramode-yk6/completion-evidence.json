@@ -1,0 +1,146 @@
+{
+  "beadId": "ultramode-yk6",
+  "status": "verified",
+  "summary": "All 18 verification checks passed. CI workflow file is valid YAML with correct triggers, steps, and ordering. package.json scripts replaced (clean removed, build+check real). Tests: 57 pass, 0 fail. Build: exit 0. No dist/ created. Working tree clean. 1 unchecked risk: actual GitHub Actions CI run (requires push to GitHub).",
+  "passedChecks": [
+    {
+      "command": "test -f .github/workflows/ci.yml",
+      "expected": "File exists at .github/workflows/ci.yml",
+      "result": "ci.yml exists (exit 0)"
+    },
+    {
+      "command": "python3 -c \"import yaml; yaml.safe_load(open('.github/workflows/ci.yml'))\"",
+      "expected": "File parses as valid YAML",
+      "result": "YAML valid (exit 0). Note: 'on' key is quoted as '\"on\"' to prevent PyYAML boolean coercion — GitHub Actions best practice (actionlint recommends this)."
+    },
+    {
+      "command": "python3 -c \"import yaml; y=yaml.safe_load(open('.github/workflows/ci.yml')); assert 'push' in y['on'] and 'main' in y['on']['push']['branches']; assert 'pull_request' in y['on'] and 'main' in y['on']['pull_request']['branches']\"",
+      "expected": "CI triggers on push to main and pull_request to main",
+      "result": "Triggers correct (exit 0)"
+    },
+    {
+      "command": "grep -q 'actions/checkout@v4' .github/workflows/ci.yml",
+      "expected": "Checkout step uses actions/checkout@v4",
+      "result": "checkout present (exit 0)"
+    },
+    {
+      "command": "grep -q 'oven-sh/setup-bun@v2' .github/workflows/ci.yml",
+      "expected": "Setup Bun step uses oven-sh/setup-bun@v2",
+      "result": "setup-bun present (exit 0)"
+    },
+    {
+      "command": "grep -q 'bun test test/' .github/workflows/ci.yml",
+      "expected": "Test step runs 'bun test test/'",
+      "result": "test step present (exit 0)"
+    },
+    {
+      "command": "grep -q 'bun build index.ts --target bun' .github/workflows/ci.yml",
+      "expected": "Build step runs 'bun build index.ts --target bun'",
+      "result": "build step present (exit 0)"
+    },
+    {
+      "command": "grep -q '\\-\\-external @oh-my-pi/pi-ai' .github/workflows/ci.yml",
+      "expected": "Build step includes --external @oh-my-pi/pi-ai flag",
+      "result": "pi-ai external present (exit 0)"
+    },
+    {
+      "command": "grep -q '\\-\\-external @oh-my-pi/pi-coding-agent' .github/workflows/ci.yml",
+      "expected": "Build step includes --external @oh-my-pi/pi-coding-agent flag",
+      "result": "pi-coding-agent external present (exit 0)"
+    },
+    {
+      "command": "grep -c 'continue-on-error' .github/workflows/ci.yml",
+      "expected": "0 occurrences of continue-on-error (no error masking)",
+      "result": "count: 0"
+    },
+    {
+      "command": "grep -c '|| true' .github/workflows/ci.yml",
+      "expected": "0 occurrences of '|| true' (no error masking)",
+      "result": "count: 0"
+    },
+    {
+      "command": "CHECKOUT_LINE=$(grep -n 'actions/checkout@v4' .github/workflows/ci.yml | cut -d: -f1); SETUP_LINE=$(grep -n 'oven-sh/setup-bun@v2' .github/workflows/ci.yml | cut -d: -f1); [ \"$CHECKOUT_LINE\" -lt \"$SETUP_LINE\" ]",
+      "expected": "Checkout step appears before Setup Bun step",
+      "result": "ordering correct (checkout:14 < setup:16)"
+    },
+    {
+      "command": "python3 -c \"import json; s = json.load(open('package.json'))['scripts']; assert 'clean' not in s; assert s['build'] == 'bun build index.ts --target bun --external @oh-my-pi/pi-ai --external @oh-my-pi/pi-coding-agent'; assert s['check'] == 'bun test test/'\"",
+      "expected": "clean removed; build is real build command; check is bun test test/",
+      "result": "Scripts correct (exit 0)"
+    },
+    {
+      "command": "python3 -c \"import json; assert len(json.load(open('package.json'))['scripts']) == 2\"",
+      "expected": "Exactly 2 scripts (build and check only)",
+      "result": "script count correct (exit 0)"
+    },
+    {
+      "command": "bun run check",
+      "expected": "57 pass, 0 fail, exit 0",
+      "result": "57 pass, 0 fail, 179 expect() calls, Ran 57 tests across 5 files. [266ms]. Exit 0."
+    },
+    {
+      "command": "bun run build > /dev/null 2>&1; echo $?",
+      "expected": "Build exits 0",
+      "result": "build exit: 0"
+    },
+    {
+      "command": "ls dist/ 2>&1",
+      "expected": "No dist/ directory created by build (build writes to stdout)",
+      "result": "ls: cannot access 'dist/': No such file or directory (exit 2 — expected)"
+    },
+    {
+      "command": "git status --short",
+      "expected": "Clean working tree (all changes committed)",
+      "result": "Empty output — working tree clean"
+    },
+    {
+      "command": "git log --oneline -1",
+      "expected": "Commit 'chore: add CI workflow + fix package.json scripts' present",
+      "result": "58d114f chore: add CI workflow + fix package.json scripts"
+    },
+    {
+      "command": "git diff --name-only HEAD~1",
+      "expected": "Changed files match plan blast radius: .github/workflows/ci.yml + package.json (+ bead artifacts)",
+      "result": ".beads/artifacts/ultramode-yk6/progress.txt, .beads/issues.jsonl, .github/workflows/ci.yml, package.json — matches plan"
+    },
+    {
+      "command": "br lint ultramode-yk6 --json",
+      "expected": "0 lint issues",
+      "result": "{\"total\":0,\"issues\":0,\"results\":[]}"
+    },
+    {
+      "command": "br dep cycles --json",
+      "expected": "No dependency cycles",
+      "result": "{\"cycles\":[],\"count\":0}"
+    }
+  ],
+  "failedChecks": [],
+  "uncheckedRisks": [
+    "Risk: 'oven-sh/setup-bun@v2 action changes or breaks' — cannot verify actual GitHub Actions execution without pushing to GitHub and observing a live CI run. The action is pinned to major version @v2 following semver, but the actual run hasn't been observed. Reason: requires push to GitHub remote, which happens at /pr.",
+    "Risk: 'CI is slow, discouraging developers' — actual CI wall-clock time (including runner setup) cannot be measured locally. Local test+build is <1s, but GitHub Actions adds ~10-15s for checkout+setup. Reason: requires live CI run.",
+    "Risk: 'Tests fail in CI due to environment differences (OS, Bun version)' — tests were verified in a clean local environment simulating CI (during /create investigation), but the actual ubuntu-latest runner with bun-version:latest may differ. Reason: requires live CI run.",
+    "Risk: 'GitHub Actions YAML syntax error' — YAML is valid per PyYAML, but GitHub Actions uses its own YAML parser. The quoted \"on\" key is compatible with both. Reason: requires live CI run to confirm GitHub Actions accepts the workflow.",
+    "Risk: 'Build step produces unexpected output in CI' — build output is verified locally as going to stdout (19,623 bytes, no files). CI runner behavior should be identical but isn't directly observed. Reason: requires live CI run.",
+    "Risk: '--external flag behavior changes in future Bun versions' — verified with bun 1.3.14 locally. CI uses bun-version:latest which may differ. Reason: requires live CI run with whatever 'latest' resolves to at run time.",
+    "Risk: 'bun build --target bun --external flags don't work as expected in CI' — verified locally in clean env simulation (exit 0, 19,623 bytes) during /create. The actual GitHub Actions environment may differ. Reason: requires live CI run."
+  ],
+  "artifacts": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "purpose": "GitHub Actions CI workflow — runs bun test + bun build on push/PR to main"
+    },
+    {
+      "path": "package.json",
+      "purpose": "Updated scripts: real build and check commands replacing echo stubs"
+    },
+    {
+      "path": ".beads/artifacts/ultramode-yk6/progress.txt",
+      "purpose": "Wave-by-wave implementation progress log"
+    }
+  ],
+  "followUps": [
+    "Verify first live CI run after PR merge — confirms GitHub Actions accepts the workflow and all steps pass on ubuntu-latest. This is the unchecked risk that requires push to GitHub.",
+    "Fix pre-existing type errors at index.ts:376,379 (Model<Api> | undefined not assignable to Model<Api>) — separate bead, enables adding tsc --noEmit to CI.",
+    "Consider branch protection rules requiring CI to pass before merge — GitHub repo setting, natural follow-up after CI is live."
+  ]
+}
