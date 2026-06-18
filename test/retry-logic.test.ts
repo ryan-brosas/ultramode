@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import type * as IndexModule from "../index.ts";
 import type { Phase } from "../index.ts";
 import {
+  createSpy,
   importIndex,
   installPiAiMock,
   mockExtensionAPI,
@@ -157,8 +158,11 @@ describe("retry branch behavior via handleTurnEnd", () => {
       reasoning: "exhausted",
     });
 
-    // Track br update calls for blocked status.
-    const brCalls: string[][] = [];
+    // Track br/bv exec calls as [cmd, args] tuples so assertions can verify
+    // the executable name (not just argv) — guards against a regression that
+    // calls pi.exec("bv", ["update", ..., "blocked"]) and still satisfies an
+    // argv-only check.
+    const execTuples: [string, string[]][] = [];
     installPiAiMock({
       complete: async () => ({
         content: [{ type: "text", text: retryJson }],
@@ -187,14 +191,14 @@ describe("retry branch behavior via handleTurnEnd", () => {
       getApiKeyResult: "test-api-key",
     });
 
-    // Track all exec args to verify br update --status blocked fired.
-    const execSpy = (pi as unknown as MockExtensionAPI).exec;
-    const origImpl = execSpy;
-    const trackedExec = ((...args: [string, string[]]) => {
-      brCalls.push(args[1]);
-      return origImpl(...args);
-    }) as typeof origImpl;
-    (pi as unknown as MockExtensionAPI).exec = trackedExec;
+    // Wrap exec to record [cmd, args] tuples without changing behavior.
+    const origExec = pi.exec;
+    (pi as unknown as MockExtensionAPI).exec = createSpy(
+      async (cmd: string, args: string[]) => {
+        execTuples.push([cmd, args]);
+        return origExec(cmd, args);
+      }
+    );
 
     const state = getState(ctx);
     state.mode = "on";
@@ -204,21 +208,43 @@ describe("retry branch behavior via handleTurnEnd", () => {
 
     await handleTurnEnd(pi, ctx, { content: "final output" });
 
-    // The blocked branch should have called br update --status blocked.
-    const blockedCall = brCalls.find(
-      (args) =>
+    // The blocked branch must call `br update <beadId> --status blocked`
+    // (executable = "br", not "bv"). Find the blocked call by argv signature.
+    const blockedIdx = execTuples.findIndex(
+      ([cmd, args]) =>
+        cmd === "br" &&
         args[0] === "update" &&
         args.includes("--status") &&
         args.includes("blocked")
     );
-    expect(blockedCall).toBeDefined();
-    expect(blockedCall![1]).toBe("ultramode-blocked");
+    expect(blockedIdx).toBeGreaterThanOrEqual(0);
+    expect(execTuples[blockedIdx][1]).toContain("ultramode-blocked");
+    // Explicitly assert the executable name is "br" (regression guard).
+    expect(execTuples[blockedIdx][0]).toBe("br");
 
     // State should reset to selection.
     const after = getState(ctx);
     expect(after.beadId).toBeNull();
     expect(after.phase).toBe("selecting");
     expect(after.retries).toBe(0);
+
+    // The blocked branch must then start a new selection via runSelection.
+    // runSelection issues: bv triage → br scheduler → (br list if empty).
+    // Assert those calls fire AFTER the blocked update call.
+    const postBlockedCalls = execTuples.slice(blockedIdx + 1);
+    const bvTriageAfter = postBlockedCalls.find(
+      ([cmd, args]) => cmd === "bv" && args.includes("--robot-triage")
+    );
+    expect(bvTriageAfter).toBeDefined();
+    const brSchedulerAfter = postBlockedCalls.find(
+      ([cmd, args]) => cmd === "br" && args[0] === "scheduler"
+    );
+    expect(brSchedulerAfter).toBeDefined();
+    // Scheduler returned empty recommendations → br list fallback fires.
+    const brListAfter = postBlockedCalls.find(
+      ([cmd, args]) => cmd === "br" && args[0] === "list"
+    );
+    expect(brListAfter).toBeDefined();
   });
 
   test("no-command retry case resets to selection instead of silently idling", async () => {

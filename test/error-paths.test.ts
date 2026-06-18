@@ -35,17 +35,21 @@ describe("decide error paths", () => {
     await expect(decide(ctx, "test prompt")).rejects.toThrow("no API key");
   });
 
-  test("falls back to completeSimple when complete throws", async () => {
-    const completeCalls: string[] = [];
-    const completeSimpleCalls: string[] = [];
+  test("falls back to completeSimple when complete throws and passes apiKey to both", async () => {
+    // Capture the options arg (3rd positional) passed to complete/completeSimple.
+    // decide() calls `complete(model, context, { apiKey })` — a regression that
+    // drops apiKey from the call would still pass the prior tests because both
+    // mocks ignored their arguments. Asserting apiKey wiring guards the risk.
+    const completeCalls: { apiKey?: string }[] = [];
+    const completeSimpleCalls: { apiKey?: string }[] = [];
 
     installPiAiMock({
-      complete: async () => {
-        completeCalls.push("complete");
+      complete: async (_model: unknown, _context: unknown, opts?: { apiKey?: string }) => {
+        completeCalls.push(opts ?? {});
         throw new Error("stream provider failed");
       },
-      completeSimple: async () => {
-        completeSimpleCalls.push("completeSimple");
+      completeSimple: async (_model: unknown, _context: unknown, opts?: { apiKey?: string }) => {
+        completeSimpleCalls.push(opts ?? {});
         return {
           content: [{ type: "text", text: "fallback text" }],
         };
@@ -61,8 +65,12 @@ describe("decide error paths", () => {
     const result = await decide(ctx, "test prompt");
 
     expect(result).toBe("fallback text");
+    // complete was attempted first and received the resolved API key.
     expect(completeCalls).toHaveLength(1);
+    expect(completeCalls[0].apiKey).toBe("test-api-key");
+    // completeSimple was the fallback and ALSO received the resolved API key.
     expect(completeSimpleCalls).toHaveLength(1);
+    expect(completeSimpleCalls[0].apiKey).toBe("test-api-key");
   });
 });
 
@@ -217,12 +225,18 @@ describe("scheduler fallback to br list", () => {
     expect(execCalls[1][1][0]).toBe("scheduler");
     expect(execCalls[1][1]).toContain("--json");
 
-    // Call 2: br list fallback
+    // Call 2: br list fallback — must query BOTH open and in_progress
+    // statuses. Asserting both guards against a regression that drops the
+    // in_progress filter (which would silently exclude claimed beads).
     expect(execCalls[2][0]).toBe("br");
     expect(execCalls[2][1][0]).toBe("list");
     expect(execCalls[2][1]).toContain("--status");
     expect(execCalls[2][1]).toContain("open");
+    expect(execCalls[2][1]).toContain("in_progress");
     expect(execCalls[2][1]).toContain("--json");
+    // Exactly two --status flags (one per status).
+    const statusFlags = execCalls[2][1].filter((a) => a === "--status");
+    expect(statusFlags).toHaveLength(2);
 
     // The wait decision should have idled the loop.
     const after = getState(ctx);
