@@ -105,7 +105,7 @@
     }
   ],
   "followUps": [
-    "Update .beads/artifacts/ultramode-eqa/decisions.md: decision #1 and rejected alternative #1 reject Promise.race, but the shipped implementation uses Promise.race + signal (defense-in-depth). The plan's own Risk Mitigation Details (lines 487-921) reasoned through this and concluded the signal-only approach has a real gap for providers that ignore AbortSignal. The implementation resolved this by using both. decisions.md should be updated to reflect the actual shipped approach and the reasoning.",
-    "PRD risk table line 597 mitigation is incorrect as written ('Even if a provider ignores the signal, the decide() function returns immediately on timeout (the promise rejects)') — this is only true because the shipped implementation uses Promise.race, not because of the signal alone. The PRD predates the implementation decision. Not blocking, but should be corrected for accuracy."
+    "RESOLVED: decisions.md updated — decision #1 now reflects the shipped Promise.race + signal approach (defense-in-depth). Rejected alternative #1 marked as OVERTURNED during /ship with full reasoning. Assumption #2 corrected to state decide() does NOT depend on the provider respecting the signal.",
+    "RESOLVED: PRD risk table line 597 mitigation corrected to accurately describe the Promise.race + signal defense-in-depth approach, replacing the incorrect claim that the signal alone causes decide() to return on timeout."
   ]
 }
