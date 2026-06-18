@@ -41,6 +41,11 @@ export interface UltramodeState {
    * turn_end: only chain after turns that ultramode itself triggered, not
    * after the user's own messages. */
   lastInjectedCommand: string | null;
+  /** Feedback from the last retry decision. The LLM's reasoning for why
+   * the phase failed. This gets injected into the next attempt so the
+   * agent knows what to fix — "PRD is missing Out of Scope section" —
+   * instead of blindly re-running the phase. */
+  retryFeedback: string | null;
 }
 
 export interface SelectionDecision {
@@ -127,6 +132,7 @@ export function createState(): UltramodeState {
     lastDecision: null,
     worktreePath: null,
     lastInjectedCommand: null,
+    retryFeedback: null,
   };
 }
 
@@ -204,6 +210,10 @@ export function reconstructState(ctx: ExtensionContext): UltramodeState {
       lastInjectedCommand:
         typeof candidate.lastInjectedCommand === "string"
           ? candidate.lastInjectedCommand
+          : null,
+      retryFeedback:
+        typeof candidate.retryFeedback === "string"
+          ? candidate.retryFeedback
           : null,
     };
   }
@@ -1016,6 +1026,7 @@ export async function handleTurnEnd(
       state.phase = newPhase;
     }
     state.retries = 0;
+    state.retryFeedback = null;
     persistState(pi, ctx, state);
     updateWidget(ctx, state);
 
@@ -1034,17 +1045,26 @@ export async function handleTurnEnd(
   } else if (decision.action === "retry") {
     if (state.retries < MAX_RETRIES) {
       state.retries++;
+      // Store the LLM's reasoning as feedback for the next attempt.
+      // This gets injected into the next command so the agent knows
+      // WHAT to fix, not just "try again".
+      state.retryFeedback = decision.reasoning;
       persistState(pi, ctx, state);
       updateWidget(ctx, state);
       ctx.ui.notify(
         `ultramode: retry ${state.retries}/${MAX_RETRIES} — ${decision.reasoning}`,
         "info"
       );
-      // PHASE_WHITELIST maps phase → next command (wrong direction for retry).
-      // COMMAND_FROM_PHASE maps phase → the command that started it.
       const currentCmd = COMMAND_FROM_PHASE[state.phase];
       if (currentCmd && state.beadId) {
-        injectCommand(pi, ctx, state, `${currentCmd} ${state.beadId}`);
+        // Inject the command with feedback appended so the agent knows
+        // what went wrong and what to fix.
+        injectCommand(
+          pi,
+          ctx,
+          state,
+          `${currentCmd} ${state.beadId}\n\nFeedback from previous attempt: ${decision.reasoning}`
+        );
       } else {
         // Can't re-inject (no command for this phase, or no beadId).
         // Reset to selection rather than getting stuck with mode=on but no turn.
@@ -1055,6 +1075,7 @@ export async function handleTurnEnd(
         state.beadId = null;
         state.phase = "selecting";
         state.retries = 0;
+        state.retryFeedback = null;
         persistState(pi, ctx, state);
         updateWidget(ctx, state);
         await runSelection(pi, ctx);
@@ -1074,6 +1095,7 @@ export async function handleTurnEnd(
     state.beadId = null;
     state.phase = "selecting";
     state.retries = 0;
+    state.retryFeedback = null;
     persistState(pi, ctx, state);
     updateWidget(ctx, state);
     await runSelection(pi, ctx);
@@ -1095,6 +1117,7 @@ export async function handleTurnEnd(
       state.worktreePath = null;
     }
     state.mode = "idle";
+    state.retryFeedback = null;
     persistState(pi, ctx, state);
     updateWidget(ctx, state);
   }
@@ -1259,6 +1282,7 @@ export default function ultramode(pi: ExtensionAPI): void {
           state.retries = 0;
           state.lastDecision = null;
           state.lastInjectedCommand = null;
+          state.retryFeedback = null;
           persistState(pi, ctx, state);
           updateWidget(ctx, state);
           ctx.ui.notify(

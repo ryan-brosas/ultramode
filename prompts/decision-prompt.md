@@ -52,6 +52,14 @@ Choose `retry` when the artifact content shows the work is incomplete or low qua
 - The artifact content looks padded, repetitive, or templated
 - The agent's output was incomplete or had errors
 
+**Critical**: When you choose `retry`, your `reasoning` is injected into the next attempt as feedback. The agent will see: "Feedback from previous attempt: <your reasoning>". So your reasoning MUST be actionable — tell the agent exactly what to fix:
+- BAD: "PRD is incomplete"
+- GOOD: "PRD is missing the Out of Scope section — add a list of explicitly excluded work items, and the Success Criteria section needs falsifiable acceptance tests"
+- BAD: "Plan is too vague"
+- GOOD: "Plan has no blast radius section — add which files will be changed and how many lines. Tasks are too generic — replace 'implement the feature' with specific steps like 'add CI workflow file at .github/workflows/ci.yml with checkout, setup-bun, test, and build steps'"
+
+Be specific. Reference exact sections, line content, or test output that needs to change.
+
 The retry cap is 3; if retries >= 3, choose `reject` instead.
 
 ### Reject
@@ -76,7 +84,7 @@ Return ONLY a JSON object on the last line, with this exact schema:
 ```json
 {
   "action": "proceed" | "reject" | "retry" | "stop",
-  "reasoning": "<one-sentence explanation citing specific evidence from the artifact content>",
+  "reasoning": "<actionable explanation — cite specific evidence, and for retries, tell the agent exactly what to fix>",
   "nextCommand": "/<command> <bead_id> or null if not proceeding"
 }
 ```
