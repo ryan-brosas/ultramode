@@ -396,9 +396,28 @@ export async function decide(
 
 export async function runSelection(
   pi: ExtensionAPI,
-  ctx: ExtensionContext
+  ctx: ExtensionContext,
+  description?: string
 ): Promise<void> {
   const state = getState(ctx);
+
+  // Fast path: if a description was provided (/ultramode on "fix the bug in..."),
+  // skip triage/scheduler/LLM and go straight to /create.
+  if (description) {
+    state.beadId = null;
+    state.phase = "creating";
+    state.retries = 0;
+    state.mode = "on";
+    state.lastDecision = `manual create: ${description.slice(0, 100)}`;
+    persistState(pi, ctx, state);
+    updateWidget(ctx, state);
+    ctx.ui.notify(
+      `ultramode: creating bead — ${description.slice(0, 80)}`,
+      "info"
+    );
+    pi.sendUserMessage(`/create ${description}`, { deliverAs: "followUp" });
+    return;
+  }
 
   // 1. bv triage
   let triageJson = "{}";
@@ -457,7 +476,6 @@ export async function runSelection(
     bv_triage_json: triageJson,
     br_scheduler_json: schedulerJson,
   });
-
   // 4. Call LLM
   let decisionText: string;
   try {
@@ -889,7 +907,7 @@ export default function ultramode(pi: ExtensionAPI): void {
     description: "Control the ultramode autonomous loop (on|off|status|continue)",
     async handler(args: string, ctx: ExtensionCommandContext): Promise<void> {
       const subcommand = args.trim().split(/\s+/)[0] || "status";
-      const state = getState(ctx);
+      const restArgs = args.trim().slice(subcommand.length).trim();
 
       switch (subcommand) {
         case "on": {
@@ -902,7 +920,7 @@ export default function ultramode(pi: ExtensionAPI): void {
           updateWidget(ctx, state);
           ctx.ui.notify("ultramode: autonomous loop activated", "info");
           if (!state.beadId) {
-            await runSelection(pi, ctx);
+            await runSelection(pi, ctx, restArgs || undefined);
           }
           break;
         }
