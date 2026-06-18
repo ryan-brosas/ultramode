@@ -18,6 +18,7 @@ Every entry must include impact and mitigation. A gotcha without a mitigation is
 | 2026-06 | workflow | `ctx.model` may be undefined if no model is configured | `decide()` throws "no active model on session" | Catch the error in `turn_end` handler, notify user via `ctx.ui.notify("ultramode: no model configured", "error")`, set `state.mode = "idle"` |
 | 2026-06 | workflow | The workflow-gate blocks `edit`/`write` until PRD + plan exist at ≥600 lines | Can't scaffold files before `plan.md` is materialized | Write to `.beads/` always passes the gate. For repo-root files, ensure `plan.md` meets the 600-line density check, or use `OMP_SKIP_BEADS_WORKFLOW=1` for emergencies |
 | 2026-06 | API | `complete()` may reject a static `apiKey` string for providers requiring `ApiKeyResolver` | LLM call fails with type error | Fallback to `completeSimple()` which accepts `ApiKey` (string or resolver). The `decide()` helper tries `complete()` first, catches, then retries with `completeSimple()` |
+| 2026-06 | testing | `mock.module()` in Bun applies only on the NEXT import of the mocked module — a static `import` in the test file loads the real module before the mock registers | Tests silently exercise production `@oh-my-pi/pi-ai` instead of the mock, causing network calls or wrong behavior | Use cache-busted dynamic imports: `import(\`../index.ts?${label}-${Date.now()}\`)`. The `importIndex(label)` helper in `test/mocks.ts` does this. Never `import ... from "../index"` at module top-level in tests that mock `@oh-my-pi/pi-ai` |
 
 ## Template Bootstrap Gotchas
 
