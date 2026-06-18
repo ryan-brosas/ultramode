@@ -1,0 +1,32 @@
+{
+  "beadId": "ultramode-aqr",
+  "type": "chore",
+  "priority": 2,
+  "estimate_minutes": 180,
+  "requirements": [
+    {"id": 1, "text": "Extension loads in a real OMP session without errors", "priority": "MUST", "acceptance": "omp -p -e ./index.ts \"echo test\" exits 0 with no error output; no Cannot find module or TypeError in output"},
+    {"id": 2, "text": "session_start event fires and extension initializes", "priority": "MUST", "acceptance": "Session journal contains a session entry with correct cwd; session_start handler runs (widget update or notification). If mode=off, runSelection does NOT fire"},
+    {"id": 3, "text": "/ultramode status returns correct initial state", "priority": "MUST", "acceptance": "omp -p --mode json -e ./index.ts \"/ultramode status\" output includes mode: off, bead: none, phase: selecting, retries: 0/3"},
+    {"id": 4, "text": "/ultramode on activates the loop and triggers work selection", "priority": "MUST", "acceptance": "bv --robot-triage --format json is called; br scheduler --json is called; decide() is called (notification or idle); state persisted as ultramode-control entry with mode: on"},
+    {"id": 5, "text": "sendUserMessage injects a phase command the agent processes", "priority": "MUST", "acceptance": "Session journal shows user message entry with /create <bead-id> content followed by agent execution"},
+    {"id": 6, "text": "turn_end fires the decision loop after a phase completes", "priority": "MUST", "acceptance": "After /create completes, turn_end fires; handleTurnEnd calls decide(); decision acted on (next command injected or mode=idle)"},
+    {"id": 7, "text": "State survives session restart via journal reconstruction", "priority": "MUST", "acceptance": "After /ultramode on in session A, terminate, resume with --continue, /ultramode status shows mode=on reconstructed from journal"},
+    {"id": 8, "text": "hasPendingMessages guard prevents re-entrancy", "priority": "SHOULD", "acceptance": "No duplicate phase commands in session journal. If hasPendingMessages unavailable, guard is no-op and documented"},
+    {"id": 9, "text": "Retry cap marks bead blocked after 3 retries", "priority": "SHOULD", "acceptance": "After 3 retries, br update <bead-id> --status blocked fires; state resets to selecting; loop picks next bead"},
+    {"id": 10, "text": "/ultramode off deactivates the loop", "priority": "MUST", "acceptance": "/ultramode status shows mode: off; subsequent turns do not trigger decision calls"},
+    {"id": 11, "text": "/ultramode continue resets and picks next bead", "priority": "SHOULD", "acceptance": "State resets (beadId=null, phase=selecting, retries=0), runSelection() fires, new bead selected"},
+    {"id": 12, "text": "No /close command is ever injected", "priority": "MUST", "acceptance": "grep -c /close <session-journal> returns 0 matches in message content across all sessions"}
+  ],
+  "success_criteria": [
+    "Extension loads in a real OMP session without errors",
+    "/ultramode status returns correct initial state (mode=off, bead=none, phase=selecting, retries=0)",
+    "/ultramode on triggers work selection (bv + br exec calls fire, LLM decision made)",
+    "State persisted to session journal as ultramode-control custom entries",
+    "sendUserMessage injects phase commands the agent processes",
+    "turn_end fires decision loop after phase completion",
+    "State survives session restart via getBranch() reconstruction",
+    "No /close command ever injected in any session",
+    "/ultramode off deactivates the loop",
+    "All findings documented in completion-evidence.json with observed output"
+  ]
+}

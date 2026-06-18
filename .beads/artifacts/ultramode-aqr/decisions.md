@@ -1,0 +1,30 @@
+# Decisions: ultramode-aqr
+
+## Decision Log
+
+| # | Decision | Rationale | Confidence |
+|---|----------|-----------|------------|
+| 1 | Use `omp -p --mode json -e ./index.ts` for live session tests | Non-interactive mode produces structured JSON output that captures session events, tool calls, and notifications reproducibly. The `-e` flag loads the extension without requiring `omp install`, making tests self-contained and reversible. Verified during investigation: `omp -p -e ./index.ts "echo test"` exits 0 with no errors. | High |
+| 2 | Use session journal as primary evidence source | The session journal at `~/.omp/agent/sessions/-repos-ultramode/` is the ground truth for state persistence (`ultramode-control` custom entries) and message injection (`sendUserMessage` creates user message entries). JSONL format is parseable with `python3 -c "import json..."`. Verified: journal files exist and contain `session`, `message`, and custom entry types. | High |
+| 3 | No code changes to `index.ts` during this bead | This bead verifies existing behavior. If a live bug is discovered, it becomes a separate fix bead. Modifying the extension under test while testing it invalidates the test. The PRD's Out of Scope section enforces this. | High |
+| 4 | Use disposable test beads for live session tests | Live sessions may claim beads (`br update --claim`) or mark them blocked (`br update --status blocked`). To avoid polluting the real bead graph, create dummy beads with `br create` before testing and clean up with `br close` after. | Medium |
+| 5 | Fall back to interactive mode if non-interactive is insufficient | Non-interactive mode (`omp -p`) may not fire `turn_end` with enough context for the decision loop, and async `runSelection` may not complete before exit. If this happens, use `timeout 60 omp -e ./index.ts` (interactive) and capture output via `--mode json` or TUI inspection. | Medium |
+
+## Rejected Alternatives
+
+| # | Alternative | Why Rejected | Risk if Re-introduced |
+|---|-------------|--------------|----------------------|
+| 1 | Write a test harness that spawns `omp` as a subprocess and pipes commands | Adds complexity — a test harness to test an extension is a different bead. The live session test should use `omp` directly as a user would. A harness could mask integration issues that real `omp` invocations would surface. | Over-engineering; the harness itself becomes a thing to maintain and debug, distracting from the extension verification |
+| 2 | Mock the OMP runtime in a test file and call extension functions directly | This is what `ultramode-air` already did (48 unit tests). The entire point of this bead is to verify live integration — mocking defeats the purpose. The `ultramode-air` review explicitly called out "Live OMP session behavior: out of scope per PRD" as a residual risk. | Re-testing mocked paths gives false confidence; the same blind spots that `ultramode-air` identified would remain |
+| 3 | Use `omp install .` instead of `-e ./index.ts` | `omp install .` modifies global plugin state — the extension would be loaded in ALL future sessions, not just the test session. `-e` is scoped to the single invocation. Using `omp install .` requires cleanup (uninstall) after testing. | Plugin state pollution; every subsequent `omp` session in this repo would load ultramode, potentially interfering with other work |
+| 4 | Modify `index.ts` to add debug logging for the test | Modifying the extension under test invalidates the test results. If logging is needed, use the existing `ctx.ui.notify()` calls that already fire on every state transition and decision. The session journal captures these. | Testing modified code doesn't verify production behavior; bugs could be masked or introduced by the logging changes |
+
+## Assumptions
+
+| # | Assumption | Validation | Invalidation Impact |
+|---|------------|------------|---------------------|
+| 1 | `omp -p --mode json` captures extension notifications and tool calls in JSON output | Will validate in Session 1: run `omp -p --mode json -e ./index.ts "/ultramode status"` and check if the output includes notification/widget data. If not, fall back to session journal inspection. | If JSON output doesn't capture extension events, evidence must come from the session journal only. This is slower but still viable — the journal records all state and message entries. |
+| 2 | `turn_end` fires in non-interactive mode after the agent processes the prompt | Will validate in Session 2: run `/ultramode on` and check if `turn_end` handler fires (evidenced by `decide()` call or state transition in journal). If not, switch to interactive mode with `timeout`. | If `turn_end` doesn't fire in `-p` mode, Requirement 6 (turn_end decision loop) requires interactive mode. This is a known risk in the PRD Risks table. |
+| 3 | A configured model is available for `decide()` to call | Will validate by checking `omp models` output or environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.). If no model is available, `decide()` throws and the loop idles — this is expected behavior, not a test failure. | If no model is configured, Requirements 4-6 (which depend on `decide()`) verify the error handling path instead of the happy path. The test still passes if the extension handles the error correctly (mode=idle, notification shows). |
+| 4 | Session journal entries are readable by `reconstructState()` after session restart | Will validate in Session 4: run `/ultramode on`, terminate, resume with `--continue`, check `/ultramode status`. This is exactly what Requirement 7 tests. | If reconstruction fails, that's a live bug — the primary finding of this bead. A fix bead would be filed. |
+| 5 | `hasPendingMessages()` is available on `ExtensionContext` in omp v16.0.4 | Will validate by checking whether the function exists in the session context. The code already guards with `typeof ctx.hasPendingMessages === "function"`. | If unavailable, the guard is a no-op. Requirement 8 is SHOULD priority — the test documents this and verifies graceful degradation instead. |
