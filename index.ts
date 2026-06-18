@@ -338,6 +338,9 @@ interface VerificationEvidence {
   testResult: { exitCode: number; output: string } | null;
   buildResult: { exitCode: number; output: string } | null;
   artifactStatus: string;
+  /** Actual content of the phase-relevant artifact, so the LLM can read the
+   * work, not just check file existence. */
+  phaseArtifactContent: string;
 }
 
 /**
@@ -352,7 +355,8 @@ interface VerificationEvidence {
  */
 async function gatherVerificationEvidence(
   pi: ExtensionAPI,
-  beadId: string | null
+  beadId: string | null,
+  phase: Phase
 ): Promise<VerificationEvidence> {
   const evidence: VerificationEvidence = {
     gitDiff: "",
@@ -360,6 +364,7 @@ async function gatherVerificationEvidence(
     testResult: null,
     buildResult: null,
     artifactStatus: buildArtifactStatus(beadId),
+    phaseArtifactContent: "",
   };
 
   // Git diff — what changed?
@@ -414,6 +419,51 @@ async function gatherVerificationEvidence(
     // build not available — skip
   }
 
+  // Read the phase-relevant artifact content so the LLM can actually
+  // read the work, not just check file existence + line count.
+  // - creating: read prd.md (is the PRD substantive?)
+  // - planning: read plan.md + tasks.md (are they real plans?)
+  // - shipping: read git diff of actual code changes (not just --stat)
+  // - verifying: read completion-evidence.json (did checks pass?)
+  // - reviewing: read review-report.md (what did review find?)
+  const artifactMap: Partial<Record<Phase, string[]>> = {
+    creating: ["prd.md"],
+    planning: ["plan.md", "tasks.md"],
+    verifying: ["completion-evidence.json"],
+    reviewing: ["review-report.md"],
+  };
+  const filesToRead = artifactMap[phase] || [];
+  if (beadId && filesToRead.length > 0) {
+    const parts: string[] = [];
+    for (const file of filesToRead) {
+      const path = `.beads/artifacts/${beadId}/${file}`;
+      if (!existsSync(path)) {
+        parts.push(`### ${file}\n(missing)`);
+        continue;
+      }
+      try {
+        const content = readFileSync(path, "utf8");
+        parts.push(`### ${file}\n${truncate(content, 2000)}`);
+      } catch {
+        parts.push(`### ${file}\n(read error)`);
+      }
+    }
+    evidence.phaseArtifactContent = parts.join("\n\n");
+  }
+
+  // For shipping phase, read the actual code diff (not just --stat)
+  // so the LLM can review the implementation quality.
+  if (phase === "shipping" && evidence.gitDiff) {
+    try {
+      const fullDiff = await pi.exec("git", ["diff", "HEAD~1"]);
+      if (fullDiff.code === 0 && fullDiff.stdout) {
+        evidence.phaseArtifactContent = `### Git Diff (full)\n${truncate(fullDiff.stdout, 3000)}`;
+      }
+    } catch {
+      // skip — already have --stat from earlier
+    }
+  }
+
   return evidence;
 }
 
@@ -455,6 +505,13 @@ function formatVerificationEvidence(e: VerificationEvidence): string {
 
   lines.push("## Artifact Status");
   lines.push(e.artifactStatus);
+
+  if (e.phaseArtifactContent) {
+    lines.push("");
+    lines.push("## Phase Artifact Content (READ THIS)");
+    lines.push("This is the actual content of the artifact(s) produced in this phase. Read it critically — does it contain real, substantive work?");
+    lines.push(e.phaseArtifactContent);
+  }
 
   return lines.join("\n");
 }
@@ -833,7 +890,7 @@ export async function handleTurnEnd(
   // Gather deep verification evidence: git diff, git status, test results,
   // build results, artifact status. This replaces the old shallow "file
   // exists + line count" check with actual runtime evidence.
-  const evidence = await gatherVerificationEvidence(pi, state.beadId);
+  const evidence = await gatherVerificationEvidence(pi, state.beadId, state.phase);
 
   // Fetch bv triage for context (cached-ish — re-fetch each decision)
   let triageJson = "{}";
