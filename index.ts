@@ -824,6 +824,20 @@ export async function runSelection(
     state.mode = "on";
     // Create isolated worktree for this bead
     state.worktreePath = await createWorktree(pi, ctx, decision.beadId);
+    if (!state.worktreePath) {
+      // Worktree creation failed — don't proceed without isolation.
+      // The agent would work in the user's main tree with no scope
+      // enforcement. Safer to stop and let the user intervene.
+      ctx.ui.notify(
+        `ultramode: worktree creation failed for ${decision.beadId} — stopping for safety. Check git worktree status.`,
+        "error"
+      );
+      state.mode = "idle";
+      state.lastDecision = `worktree creation failed for ${decision.beadId}`;
+      persistState(pi, ctx, state);
+      updateWidget(ctx, state);
+      return;
+    }
     persistState(pi, ctx, state);
     updateWidget(ctx, state);
     ctx.ui.notify(
@@ -1033,24 +1047,32 @@ function startMergeWatcher(
       };
 
       if (pr.state === "MERGED" || pr.mergedAt) {
+        // Re-check mode AFTER the await — user may have run /ultramode off
+        // while we were waiting for gh to respond. This prevents the
+        // TOCTOU race where we override an explicit shutdown.
+        const latest = getState(ctx);
+        if (latest.mode === "off") {
+          stopMergeWatcher(sessionId);
+          return;
+        }
         stopMergeWatcher(sessionId);
         ctx.ui.notify(
           `ultramode: PR #${parsed.number} merged — continuing automatically`,
           "info"
         );
         // Auto-continue: clean up worktree, select next bead
-        await removeWorktree(pi, ctx, current.worktreePath);
-        current.worktreePath = null;
-        current.prUrl = null;
-        current.mode = "on";
-        current.beadId = null;
-        current.phase = "selecting";
-        current.retries = 0;
-        current.lastDecision = null;
-        current.lastInjectedCommand = null;
-        current.retryFeedback = null;
-        persistState(pi, ctx, current);
-        updateWidget(ctx, current);
+        await removeWorktree(pi, ctx, latest.worktreePath);
+        latest.worktreePath = null;
+        latest.prUrl = null;
+        latest.mode = "on";
+        latest.beadId = null;
+        latest.phase = "selecting";
+        latest.retries = 0;
+        latest.lastDecision = null;
+        latest.lastInjectedCommand = null;
+        latest.retryFeedback = null;
+        persistState(pi, ctx, latest);
+        updateWidget(ctx, latest);
         await runSelection(pi, ctx);
       }
     } catch {
@@ -1447,9 +1469,9 @@ export default function ultramode(pi: ExtensionAPI): void {
   pi.registerCommand("ultramode", {
     description: "Control the ultramode autonomous loop (on|off|status|continue)",
     async handler(args: string, ctx: ExtensionCommandContext): Promise<void> {
+      const state = getState(ctx);
       const subcommand = args.trim().split(/\s+/)[0] || "status";
       const restArgs = args.trim().slice(subcommand.length).trim();
-
       switch (subcommand) {
         case "on": {
           state.mode = "on";
