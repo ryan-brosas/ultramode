@@ -663,15 +663,32 @@ describe("decide() error paths", () => {
   });
 
   // Risk 1: complete() throws → completeSimple fallback
-  // This test requires module mocking. If mock.module() doesn't work with
-  // globally-resolved packages, skip this test and note it in the evidence.
   test("falls back to completeSimple when complete throws", async () => {
-    // This test depends on Bun's mock.module() support.
-    // If it fails, document it as a limitation and test via dependency injection.
-    // For now, verify the error path: when decide() catches, it should not
-    // throw the original error from complete().
-    // TODO: implement with mock.module() or dependency injection
-    expect(true).toBe(true);  // placeholder — will be implemented during /ship
+    const completeCalls: string[] = [];
+    const completeSimpleCalls: string[] = [];
+
+    mock.module("@oh-my-pi/pi-ai", () => ({
+      complete: async () => {
+        completeCalls.push("complete");
+        throw new Error("stream provider failed");
+      },
+      completeSimple: async () => {
+        completeSimpleCalls.push("completeSimple");
+        return "{\"action\":\"stop\",\"reasoning\":\"fallback succeeded\"}";
+      },
+    }));
+
+    const { decide } = await import(`../index.ts?fallback-${Date.now()}`);
+    const ctx = mockExtensionContext({
+      model: { provider: "test", id: "test-model" },
+      getApiKeyResult: "test-api-key",
+    });
+
+    const result = await decide(ctx, "test prompt");
+
+    expect(result).toEqual({ action: "stop", reasoning: "fallback succeeded" });
+    expect(completeCalls).toHaveLength(1);
+    expect(completeSimpleCalls).toHaveLength(1);
   });
 });
 

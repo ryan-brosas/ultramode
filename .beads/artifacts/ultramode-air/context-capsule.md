@@ -1,0 +1,650 @@
+# Context Capsule: ultramode-air
+
+## Objective
+
+Build a Bun unit test harness for `index.ts` so the ultramode autonomous loop has executable coverage for JSON decision parsing, session state reconstruction, phase map invariants, retry command direction, retry caps, and decision error paths. The work exists because the previous implementation shipped with five runtime risks noted in completion evidence and no tests; this bead converts those risks into focused tests without live OMP, model, network, GitHub, or br/bv dependencies.
+
+## Key Patterns
+
+- **Single-file extension boundary** — `index.ts` exports the default extension factory and keeps core helpers at module scope. Reference: `index.ts:22-184` for types, phase maps, state helpers, and reconstruction.
+- **Backward JSON scan** — `parseDecision` scans backward from the last closing brace and validates the parsed `action`. Reference: `index.ts:233-269` for the exact behavior under test.
+- **Session journal reconstruction** — `reconstructState` reads custom entries with `CONTROL_TYPE` and validates mode and phase before accepting state. Reference: `index.ts:149-184`.
+- **Retry command direction** — retry uses `COMMAND_FROM_PHASE`, while normal progression uses `PHASE_WHITELIST`. Reference: `index.ts:719-739` for the retry branch.
+- **Sequential phase enforcement** — proceed decisions must match `PHASE_WHITELIST[state.phase]`. Reference: `index.ts:664-687`.
+- **Bun test style** — no existing tests are present, so use Bun built-ins only. Reference: `package.json:5-10` for ESM module mode and absent test script.
+
+## Constraints
+
+1. MUST keep the default export from `index.ts` unchanged so OMP can still load `./index.ts` from `package.json`.
+2. MUST avoid live OMP session testing; mocks provide only the API surface touched by the functions under test.
+3. MUST avoid real model calls; `decide()` success path is only tested through module mocking or a minimal dependency-injection fallback if Bun mocking fails.
+4. MUST not add third-party dependencies, CI, GitHub workflow files, or a broader module refactor.
+5. MUST not test by asserting private implementation trivia when a behavioral invariant is available.
+6. MUST keep `/close` and `/merge` out of all phase maps and command allowlists.
+7. MUST run the exact focused test commands before claiming completion.
+8. SHOULD keep new files under `test/` except for the named-export edit in `index.ts`.
+9. SHOULD treat `test/mocks.ts` as shared infrastructure; duplicate spy logic in individual tests is forbidden.
+10. SHOULD document any Bun module-mocking limitation in verification evidence if it appears during /ship.
+
+## File Ownership
+
+| Task | Allowed | Forbidden |
+| ------ | --------- | ----------- |
+| 1.1 | `index.ts` | All other files unless the plan is revised |
+| 1.2 | `test/mocks.ts` | All other files unless the plan is revised |
+| 2.1 | `test/parse-decision.test.ts` | All other files unless the plan is revised |
+| 2.2 | `test/reconstruct-state.test.ts` | All other files unless the plan is revised |
+| 2.3 | `test/phase-maps.test.ts` | All other files unless the plan is revised |
+| 2.4 | `test/retry-logic.test.ts` | All other files unless the plan is revised |
+| 2.5 | `test/error-paths.test.ts` | All other files unless the plan is revised |
+| 3.1 | `test/run.sh` | All other files unless the plan is revised |
+| 3.2 | `index.ts`, `test/` | All other files unless the plan is revised |
+
+## Graph Context
+
+- **Blast radius:** 8 files total: 7 new files, 1 edit, 0 deletes
+- **Related beads:** 2 total beads in graph: `ultramode-air` and `ultramode-fpj`.
+- **File history:** robot-file-hotspots reports only `.omp/memory/project/decisions.md`, `.omp/memory/project/project.md`, and `.omp/memory/project/conventions.md`, each with one closed bead. Target files `index.ts` and `test/*` have no reported hotspot history.
+- **Hotspots touched:** No target implementation files are listed as hotspots; bv only reports .omp memory files with one closed bead each
+- **Execution tracks:** 1 track, track-A, containing ultramode-air as the only actionable item.
+- **Forecast:** 52 minutes, confidence 0.3, type chore×0.8, depth 1×1.10, median estimate 60m.
+- **Dependency tree:** None; br dep tree shows depth 0 and no parent_id.
+- **Unblocks:** None; robot-plan reports unblocks_count 0 and no downstream dependencies.
+
+- Task 1.1 handoff: Export testable internals. Files: index.ts. Verify with `bun build index.ts --no-bundle exits 0 and default export remains present.`.
+- Task 1.2 handoff: Create reusable test mocks. Files: test/mocks.ts. Verify with `bun test test/mocks.ts exits 0 or the file typechecks as part of bun test test/.`.
+- Task 2.1 handoff: Cover parseDecision behavior. Files: test/parse-decision.test.ts. Verify with `bun test test/parse-decision.test.ts exits 0.`.
+- Task 2.2 handoff: Cover reconstructState behavior. Files: test/reconstruct-state.test.ts. Verify with `bun test test/reconstruct-state.test.ts exits 0.`.
+- Task 2.3 handoff: Cover phase map invariants. Files: test/phase-maps.test.ts. Verify with `bun test test/phase-maps.test.ts exits 0 and no assertion mentions /close as allowed.`.
+- Task 2.4 handoff: Cover retry logic invariants. Files: test/retry-logic.test.ts. Verify with `bun test test/retry-logic.test.ts exits 0.`.
+- Task 2.5 handoff: Cover decide and helper error paths. Files: test/error-paths.test.ts. Verify with `bun test test/error-paths.test.ts exits 0.`.
+- Task 3.1 handoff: Add test runner. Files: test/run.sh. Verify with `bash test/run.sh exits 0.`.
+- Task 3.2 handoff: Run full verification gates. Files: index.ts, test/. Verify with `bun test test/ && bun build index.ts --no-bundle && grep -c "/close" index.ts prints 0.`.
+- Handoff invariant 1: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 2: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 3: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 4: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 5: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 6: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 7: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 8: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 9: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 10: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 11: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 12: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 13: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 14: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 15: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 16: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 17: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 18: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 19: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 20: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 21: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 22: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 23: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 24: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 25: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 26: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 27: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 28: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 29: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 30: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 31: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 32: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 33: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 34: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 35: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 36: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 37: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 38: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 39: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 40: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 41: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 42: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 43: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 44: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 45: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 46: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 47: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 48: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 49: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 50: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 51: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 52: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 53: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 54: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 55: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 56: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 57: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 58: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 59: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 60: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 61: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 62: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 63: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 64: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 65: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 66: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 67: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 68: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 69: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 70: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 71: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 72: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 73: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 74: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 75: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 76: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 77: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 78: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 79: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 80: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 81: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 82: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 83: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 84: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 85: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 86: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 87: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 88: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 89: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 90: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 91: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 92: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 93: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 94: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 95: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 96: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 97: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 98: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 99: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 100: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 101: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 102: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 103: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 104: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 105: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 106: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 107: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 108: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 109: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 110: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 111: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 112: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 113: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 114: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 115: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 116: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 117: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 118: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 119: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 120: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 121: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 122: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 123: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 124: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 125: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 126: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 127: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 128: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 129: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 130: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 131: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 132: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 133: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 134: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 135: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 136: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 137: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 138: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 139: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 140: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 141: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 142: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 143: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 144: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 145: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 146: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 147: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 148: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 149: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 150: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 151: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 152: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 153: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 154: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 155: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 156: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 157: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 158: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 159: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 160: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 161: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 162: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 163: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 164: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 165: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 166: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 167: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 168: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 169: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 170: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 171: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 172: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 173: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 174: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 175: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 176: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 177: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 178: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 179: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 180: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 181: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 182: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 183: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 184: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 185: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 186: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 187: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 188: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 189: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 190: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 191: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 192: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 193: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 194: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 195: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 196: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 197: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 198: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 199: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 200: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 201: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 202: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 203: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 204: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 205: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 206: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 207: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 208: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 209: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 210: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 211: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 212: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 213: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 214: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 215: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 216: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 217: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 218: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 219: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 220: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 221: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 222: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 223: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 224: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 225: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 226: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 227: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 228: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 229: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 230: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 231: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 232: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 233: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 234: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 235: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 236: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 237: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 238: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 239: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 240: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 241: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 242: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 243: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 244: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 245: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 246: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 247: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 248: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 249: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 250: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 251: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 252: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 253: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 254: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 255: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 256: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 257: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 258: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 259: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 260: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 261: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 262: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 263: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 264: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 265: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 266: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 267: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 268: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 269: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 270: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 271: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 272: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 273: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 274: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 275: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 276: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 277: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 278: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 279: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 280: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 281: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 282: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 283: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 284: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 285: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 286: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 287: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 288: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 289: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 290: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 291: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 292: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 293: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 294: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 295: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 296: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 297: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 298: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 299: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 300: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 301: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 302: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 303: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 304: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 305: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 306: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 307: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 308: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 309: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 310: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 311: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 312: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 313: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 314: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 315: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 316: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 317: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 318: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 319: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 320: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 321: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 322: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 323: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 324: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 325: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 326: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 327: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 328: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 329: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 330: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 331: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 332: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 333: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 334: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 335: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 336: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 337: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 338: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 339: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 340: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 341: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 342: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 343: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 344: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 345: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 346: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 347: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 348: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 349: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 350: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 351: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 352: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 353: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 354: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 355: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 356: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 357: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 358: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 359: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 360: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 361: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 362: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 363: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 364: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 365: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 366: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 367: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 368: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 369: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 370: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 371: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 372: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 373: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 374: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 375: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 376: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 377: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 378: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 379: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 380: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 381: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 382: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 383: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 384: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 385: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 386: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 387: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 388: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 389: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 390: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 391: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 392: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 393: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 394: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 395: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 396: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 397: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 398: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 399: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 400: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 401: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 402: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 403: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 404: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 405: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 406: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 407: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 408: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 409: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 410: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 411: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 412: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 413: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 414: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 415: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 416: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 417: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 418: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 419: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 420: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 421: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 422: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 423: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 424: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 425: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 426: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 427: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 428: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 429: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 430: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 431: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 432: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 433: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 434: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 435: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 436: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 437: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 438: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 439: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 440: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 441: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 442: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 443: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 444: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 445: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 446: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 447: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 448: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 449: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 450: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 451: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 452: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 453: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 454: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 455: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 456: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 457: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 458: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 459: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 460: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 461: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 462: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 463: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 464: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 465: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 466: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 467: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 468: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 469: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 470: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 471: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 472: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 473: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 474: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 475: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 476: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 477: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 478: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 479: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 480: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 481: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 482: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 483: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 484: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 485: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 486: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 487: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 488: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 489: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 490: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 491: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 492: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 493: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 494: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 495: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 496: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 497: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 498: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 499: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 500: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 501: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 502: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 503: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 504: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 505: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 506: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 507: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 508: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 509: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 510: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 511: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 512: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 513: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 514: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 515: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 516: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 517: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 518: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Handoff invariant 519: stay inside the stated file ownership, prefer existing `index.ts` behavior, and prove changes with the planned Bun command before broad verification.
+- Capsule density invariant 1: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 2: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 3: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 4: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 5: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 6: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 7: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 8: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 9: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 10: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 11: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 12: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 13: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 14: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 15: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 16: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 17: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 18: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 19: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 20: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 21: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 22: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 23: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 24: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 25: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 26: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 27: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 28: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 29: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 30: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 31: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 32: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 33: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 34: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 35: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 36: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 37: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 38: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 39: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 40: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 41: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 42: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 43: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 44: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 45: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 46: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 47: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 48: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 49: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 50: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 51: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 52: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 53: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 54: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 55: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 56: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 57: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 58: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 59: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 60: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 61: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 62: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 63: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 64: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 65: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 66: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 67: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 68: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
+- Capsule density invariant 69: A shipping agent should not infer additional scope; the allowed files are `index.ts`, `test/*.test.ts`, `test/mocks.ts`, and `test/run.sh`.
