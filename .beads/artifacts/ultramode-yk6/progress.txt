@@ -1,0 +1,22 @@
+ultramode-yk6 progress
+=======================
+
+Wave 1: Implementation — COMPLETE
+  Task 1.1: Write .github/workflows/ci.yml — DONE
+  Task 1.2: Edit package.json scripts — DONE
+
+Wave 2: Local Verification — COMPLETE
+  Task 2.1: Full local verification — DONE (all 20 observable truths pass)
+    - YAML valid + triggers correct
+    - All steps present (checkout, setup-bun, test, build)
+    - No error masking (continue-on-error: 0, || true: 0)
+    - Step ordering correct (checkout before setup-bun)
+    - package.json scripts correct (clean removed, build+check real)
+    - bun run check: 57 pass, 0 fail, 179 expect() calls
+    - bun run build: exit 0
+    - No dist/ directory created
+
+Wave 3: Commit — IN PROGRESS
+  Task 3.1: Commit changes
+
+NEXT: Commit, then /verify ultramode-yk6
