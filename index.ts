@@ -117,7 +117,7 @@ export const COMMAND_FROM_PHASE: Record<Phase, string | null> = {
 };
 
 export const MAX_RETRIES = 3;
-export const DECISION_TIMEOUT_MS = 120_000; // 2 minutes — hung LLM recovery
+export const DECISION_TIMEOUT_MS = 300_000; // 5 minutes — reasoning models like GLM-5.2 need time to think
 
 
 // ─── State Helpers ───────────────────────────────────────────────────────────
@@ -351,6 +351,10 @@ interface VerificationEvidence {
   /** Actual content of the phase-relevant artifact, so the LLM can read the
    * work, not just check file existence. */
   phaseArtifactContent: string;
+  /** Project context: AGENTS.md, package.json, directory tree.
+   * Lets the LLM evaluate whether the approach fits the project's
+   * conventions and architecture — not just whether the structure is complete. */
+  codebaseContext: string;
 }
 
 /**
@@ -375,6 +379,7 @@ async function gatherVerificationEvidence(
     buildResult: null,
     artifactStatus: buildArtifactStatus(beadId),
     phaseArtifactContent: "",
+    codebaseContext: "",
   };
 
   // Git diff — what changed?
@@ -474,6 +479,49 @@ async function gatherVerificationEvidence(
     }
   }
 
+  // Gather codebase context so the LLM can evaluate whether the approach
+  // fits the project's conventions and architecture. This is what lets it
+  // say "this approach doesn't match the existing pattern in X" instead of
+  // just checking structure.
+  const parts: string[] = [];
+
+  // AGENTS.md — project conventions, naming, workflow rules
+  for (const path of [".omp/AGENTS.md", "AGENTS.md", ".beads/AGENTS.md"]) {
+    if (existsSync(path)) {
+      try {
+        parts.push(`### ${path}\n${truncate(readFileSync(path, "utf8"), 1500)}`);
+      } catch { /* skip */ }
+      break; // only read the first one found
+    }
+  }
+
+  // package.json — dependencies, scripts, project shape
+  if (existsSync("package.json")) {
+    try {
+      const pkg = JSON.parse(readFileSync("package.json", "utf8"));
+      parts.push(`### package.json (key fields)\n${JSON.stringify({
+        name: pkg.name,
+        scripts: pkg.scripts,
+        dependencies: pkg.dependencies,
+        devDependencies: pkg.devDependencies,
+      }, null, 2)}`);
+    } catch { /* skip */ }
+  }
+
+  // Directory tree (depth 2) — project structure at a glance
+  try {
+    const treeResult = await pi.exec("find", [
+      ".", "-maxdepth", "2", "-not", "-path", "./.git/*",
+      "-not", "-path", "./node_modules/*", "-not", "-path", "./.beads/*",
+      "-not", "-path", "./.worktrees/*",
+    ]);
+    if (treeResult.code === 0 && treeResult.stdout) {
+      parts.push(`### Directory Structure\n${truncate(treeResult.stdout, 800)}`);
+    }
+  } catch { /* skip */ }
+
+  evidence.codebaseContext = parts.join("\n\n");
+
   return evidence;
 }
 
@@ -521,6 +569,13 @@ function formatVerificationEvidence(e: VerificationEvidence): string {
     lines.push("## Phase Artifact Content (READ THIS)");
     lines.push("This is the actual content of the artifact(s) produced in this phase. Read it critically — does it contain real, substantive work?");
     lines.push(e.phaseArtifactContent);
+  }
+
+  if (e.codebaseContext) {
+    lines.push("");
+    lines.push("## Codebase Context");
+    lines.push("This is the project's AGENTS.md, package.json, and directory structure. Use it to evaluate whether the work fits the project's conventions and architecture — not just whether it's structurally complete.");
+    lines.push(e.codebaseContext);
   }
 
   return lines.join("\n");

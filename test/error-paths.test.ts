@@ -428,8 +428,8 @@ describe("decide timeout", () => {
     await expect(decide(ctx, "prompt", -1)).rejects.toThrow("invalid timeoutMs");
     await expect(decide(ctx, "prompt", NaN)).rejects.toThrow("invalid timeoutMs");
   });
-  test("DECISION_TIMEOUT_MS is exported and equals 120000", async () => {
+  test("DECISION_TIMEOUT_MS is exported and equals 300000", async () => {
     const { DECISION_TIMEOUT_MS } = await importIndex("timeout-constant-value");
-    expect(DECISION_TIMEOUT_MS).toBe(120000);
+    expect(DECISION_TIMEOUT_MS).toBe(300000);
   });
 });
