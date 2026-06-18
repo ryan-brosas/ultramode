@@ -5,6 +5,7 @@
 // human merges. Never runs the merge-phase command.
 
 import { existsSync, readFileSync } from "node:fs";
+import { resolve as resolvePath } from "node:path";
 import { complete, completeSimple } from "@oh-my-pi/pi-ai";
 import type {
   ExtensionAPI,
@@ -1425,11 +1426,16 @@ export default function ultramode(pi: ExtensionAPI): void {
         return;
       }
 
-      // Block paths outside the worktree
-      if (!path.startsWith(state.worktreePath)) {
+      // Block paths outside the worktree. Use resolvePath to normalize
+      // the path — prevents path traversal attacks like
+      // .worktrees/test/../../../etc/passwd from bypassing the check.
+      // resolvePath resolves relative paths and collapses .. segments.
+      const resolved = resolvePath(path);
+      const worktreeResolved = resolvePath(state.worktreePath);
+      if (!resolved.startsWith(worktreeResolved + "/") && resolved !== worktreeResolved) {
         return {
           block: true,
-          reason: `ultramode: scope violation — path "${path}" is outside the active worktree "${state.worktreePath}"`,
+          reason: `ultramode: scope violation — path "${path}" resolves to "${resolved}" which is outside the active worktree "${state.worktreePath}"`,
         };
       }
 
