@@ -114,6 +114,7 @@
       "result": "{\"cycles\":[],\"count\":0}"
     }
   ],
+  "failedChecks": [],
   "uncheckedRisks": [],
   "liveVerification": {
     "prUrl": "https://github.com/ryan-brosas/ultramode/pull/3",
