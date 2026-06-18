@@ -2,59 +2,52 @@
 
 ## Verdict
 
-`changes-requested` — 3 high-confidence findings: retry-logic tests pass for the wrong reason (assert only on constants, never exercise the retry branch), hasPendingMessages guard test exercises the mock not the code, and mockExtensionAPI is dead infrastructure leaving Risk 4 (scheduler fallback) unexercised.
+`approved` — Previous review's 3 high-confidence findings (retry tests pass for wrong reason, hasPendingMessages guard unexercised, mockExtensionAPI dead/Risk 4 uncovered) are all resolved. Re-review found 2 new medium-severity test-quality issues (missing `beadId` assertion in no-command test, misleading comment); both were fixed inline during this review.
 
-**Ready for close:** false
+**Ready for close:** true
 
 ## Review Summary
 
 - Agents run: 5 (Spec PRD, Spec Plan, Bug Scan, Git History, Comment Compliance)
-- Total raw findings: 5 (2 satisfied-with-notes from PRD/Plan + 3 bug findings)
-- High-confidence (≥80): 3
-- False positives filtered: 2 (Git History: [] no findings; Comment Compliance: [] no findings)
+- Total raw findings: 4 (3 satisfied-with-notes from PRD + 1 new bug + 1 comment issue)
+- High-confidence (≥80): 2 (both addressed inline)
+- False positives filtered: 2 (Git History: [] no findings; Plan: 1 finding at conf 100, no issue)
 
 ## Findings
 
-### #1: Retry-logic tests pass for the wrong reason (confidence: 95)
-
-- **Agent:** Bug Scan
-- **Severity:** high
-- **File:** `test/retry-logic.test.ts`#1-73
-- **Issue:** All 8 tests assert only on exported constant values (`COMMAND_FROM_PHASE`, `PHASE_WHITELIST`, `MAX_RETRIES`). None call the actual retry branch in `index.ts`#711-750. Verified empirically by the reviewer: reverting `COMMAND_FROM_PHASE` back to `PHASE_WHITELIST` (the original bug) AND removing the reset-to-selection else branch both produce zero test failures. Tests like "retries at the cap take the blocked branch" assert `MAX_RETRIES < MAX_RETRIES === false` — a tautology that cannot fail regardless of the retry implementation. The PRD (Req #4) claims tests cover "retries increment under MAX_RETRIES, at MAX_RETRIES triggers blocked+selection, no-command case resets to selection (not stuck)" — none of these behaviors are actually exercised.
-- **Recommendation:** Add tests that invoke the `turn_end` event handler (or extract the retry decision-handling into a testable function) with a mock `decide()` returning `{action:"retry"}`, then assert: (a) `sendUserMessage` is called with `COMMAND_FROM_PHASE[phase]` not `PHASE_WHITELIST[phase]`, (b) `state.retries` increments, (c) at cap, `markBlocked` path fires (mock `pi.exec` br update), (d) no-command case resets `state.phase` to "selecting" and calls `runSelection`. This requires mocking `decide()` via `mock.module()` on `@oh-my-pi/pi-ai` (already supported by `installPiAiMock`).
-
-### #2: hasPendingMessages guard test exercises the mock, not the code (confidence: 85)
+### #1: No-command retry test missing beadId assertion (confidence: 80) — ADDRESSED
 
 - **Agent:** Bug Scan
 - **Severity:** medium
-- **File:** `test/error-paths.test.ts`#68-73
-- **Issue:** Risk 2 (sendUserMessage re-entrancy guard at `index.ts`#804) is claimed as tested (PRD line 101, risk-coverage table line 242). The test "hasPendingMessages mock is callable when provided" only verifies that the mock spy function itself is callable and returns `true`. It never calls `handleTurnEnd` or the `turn_end` event handler, so it does not verify the early-return behavior of the guard. The guard at `index.ts`#804 (inside the `ultramode()` factory's `turn_end` handler) is never invoked by any test.
-- **Recommendation:** Register the `ultramode(pi)` factory with a `mockExtensionAPI` + `mockExtensionContext({hasPendingMessages: true})`, emit a `turn_end` event, and assert that `handleTurnEnd` is NOT called (e.g. `pi.exec` spy has zero calls, or `decide` mock not invoked). Then repeat with `hasPendingMessages: false` and assert the handler proceeds.
+- **File:** `test/retry-logic.test.ts`#224-276
+- **Issue:** The "no-command retry case resets to selection" test asserts `after.phase === "selecting"` and `after.retries === 0`, but both were already true before `handleTurnEnd` was called (state was initialized with `phase: "selecting"`, `retries: 0`). The critical missing assertion was `expect(after.beadId).toBeNull()` — without it, if the no-command branch idled without clearing `beadId`, the test would still pass. Mutation testing by the reviewer confirmed: replacing the reset branch with `state.mode='idle'` left the test passing. Same class of bug as original finding #1 (tests that pass for the wrong reason).
+- **Recommendation:** Applied — added `expect(after.beadId).toBeNull()` at line 274. The no-command test now verifies that `beadId` is cleared from `"ultramode-nocmd"` to `null`, which would fail if the reset branch were removed.
 
-### #3: mockExtensionAPI is dead infrastructure; Risk 4 (scheduler fallback) unexercised (confidence: 90)
+### #2: Misleading comment in retries-increment test (confidence: 85) — ADDRESSED
 
-- **Agent:** Bug Scan
-- **Severity:** medium
-- **File:** `test/mocks.ts`#88-117
-- **Issue:** `mockExtensionAPI()` is exported but never imported or used by any test file (verified: `grep mockExtensionAPI test/*.test.ts` returns no matches outside mocks.ts). Consequently, Risk 4 (scheduler empty → `br list` fallback, PRD line 103, risk-coverage table line 244) has no test coverage despite being claimed in the PRD. The `runSelection()` function (`index.ts`#370-525), which contains the scheduler fallback logic, is never exercised by any test. Risk 4 remains unchecked, contradicting the PRD's claim that all 5 risks are converted to checked.
-- **Recommendation:** Add a test that calls `runSelection` (export it or invoke via the `ultramode(pi)` factory's `session_start`/`on` handler) with `mockExtensionAPI({execResults: [{stdout: '{"recommendations":[]}', code: 0}, {stdout: '[]', code: 0}]})` and assert that the second `pi.exec` call uses `br list` args (the fallback). Alternatively, export `runSelection` and test it directly with a mocked `decide()`.
+- **Agent:** Comment Compliance
+- **Severity:** medium (comment accuracy, not test correctness)
+- **File:** `test/retry-logic.test.ts`#150
+- **Issue:** Comment stated "Third retry: 2 → 3 (at cap, next call should trigger blocked branch)" but the test never performs a third `handleTurnEnd` call — it only asserts `MAX_RETRIES === 3`. The comment described an action that does not occur in the test, creating confusion about what the test verifies.
+- **Recommendation:** Applied — rewrote comment to "Confirm MAX_RETRIES is 3 (the blocked branch is tested separately below)." at line 150.
 
 ## Spec ↔ Code Adherence
 
-- PRD requirement coverage: 8/8 requirements implemented (all tests pass, all files exist, runner works). However, 3 of the 5 "unchecked risks" the PRD claims to convert to checked (Risks 2, 4, and partially the retry-path aspect of the stuck-loop fix) are not actually exercised by executable tests — see findings #1-#3.
-- Plan task coverage: 9/9 tasks completed (Wave 1: 1.1, 1.2; Wave 2: 2.1-2.5; Wave 3: 3.1, 3.2). All verification gates pass.
-- Drift from plan: Minor — `extractText` signature tightened from `any` to `unknown` with runtime type narrowing (PRD Export Strategy specified only adding `export`). This is a type-safety improvement, not a behavior change, and does not violate the out-of-scope "no module refactor" constraint. Also `mocks.ts` exports `installPiAiMock` and `importIndex` helpers not specified in PRD Req #6, but these implement the module-mocking approach the PRD itself prescribes (Risk 1, line 100).
+- PRD requirement coverage: 8/8 requirements implemented. All 5 unchecked risks from the PRD are now genuinely exercised:
+  - Risk 1 (complete() API key resolution): `completeSimple` fallback tested in `error-paths.test.ts`#36-64.
+  - Risk 2 (sendUserMessages re-entrancy): `hasPendingMessages` guard tested via `turn_end` handler in `error-paths.test.ts`#76-118. Guard verified to skip `handleTurnEnd` when pending=true, proceed when false.
+  - Risk 3 (ctx.model undefined): tested in `error-paths.test.ts`#11-24.
+  - Risk 4 (br scheduler empty): `runSelection` fallback tested in `error-paths.test.ts`#172-228. Fallback to `br list` verified when recommendations empty, skipped when non-empty.
+  - Risk 5 (LLM invalid JSON): tested in `parse-decision.test.ts`.
+- Plan task coverage: 9/9 tasks completed (Wave 1: 1.1, 1.2; Wave 2: 2.1-2.5; Wave 3: 3.1, 3.2).
+- Drift from plan: `extractText` signature tightened from `any` to `unknown` (type-safety improvement, not behavior change). `mocks.ts` exports `installPiAiMock` and `importIndex` helpers beyond PRD Req #6 (implement module-mocking the PRD prescribes at Risk 1). `getState`, `runSelection`, `handleTurnEnd` exported to enable behavioral tests (fix for original review findings).
 
 ## Residual Risks
 
-- Risk 1 (complete() API key resolution fails for some providers): the `completeSimple` fallback path is tested (`test/error-paths.test.ts`#36-64). Accepted as covered.
-- Risk 2 (sendUserMessage re-entrancy): guard exists at `index.ts`#804 but NOT exercised by any test — see finding #2. Deferred: requires invoking the `turn_end` handler.
-- Risk 3 (ctx.model undefined): tested (`test/error-paths.test.ts`). Accepted as covered.
-- Risk 4 (br scheduler returns zero recommendations): fallback exists in `runSelection` (`index.ts`#370-525) but NOT exercised by any test — see finding #3. Deferred: requires invoking `runSelection`.
-- Risk 5 (LLM returns invalid JSON): tested (`test/parse-decision.test.ts`). Accepted as covered.
 - Live OMP session behavior: out of scope per PRD. Accepted.
 - Worktree enforcement: out of scope per PRD. Accepted.
+- `runSelection()` success path (decision.action === "select"): not directly tested because it requires `decide()` to return a select decision with a beadId, then calls `pi.exec("br", ["update", ...])` — the error path and fallback are tested, but the select-success path relies on `complete()` mocking which is exercised indirectly. Accepted as a follow-up consideration.
 
 ## Summary
 
-The test harness builds, all 44 tests pass, and the 8 PRD requirements are nominally satisfied. However, 3 high-confidence findings reveal that the retry-logic tests, the hasPendingMessages guard test, and the scheduler-fallback risk coverage all pass for the wrong reasons — they assert on constants or mock callability rather than exercising the actual code paths they claim to guard. The tests are not wrong about what they assert, but they do not prove the bug fixes and runtime risks they were created to cover. Address findings #1-#3 by adding tests that invoke the actual `handleTurnEnd`/`runSelection`/`turn_end` handler paths with mocked `decide()` and `pi.exec` before this bead is safe to merge.
+The previous review's 3 high-confidence findings are all genuinely resolved: retry tests now invoke `handleTurnEnd` with mocked `decide()` and assert on `sendUserMessage`/`state` mutations, the `hasPendingMessages` guard is tested via the actual `turn_end` handler, and `runSelection`'s scheduler fallback is exercised directly. The re-review found 2 new medium test-quality issues (a missing `beadId` assertion and a misleading comment), both fixed inline during this review. All 48 tests pass, build succeeds, lint clean. This bead is safe to merge.

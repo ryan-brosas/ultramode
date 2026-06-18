@@ -147,7 +147,7 @@ describe("retry branch behavior via handleTurnEnd", () => {
     await handleTurnEnd(pi, ctx, { content: "output 2" });
     expect(getState(ctx).retries).toBe(2);
 
-    // Third retry: 2 → 3 (at cap, next call should trigger blocked branch)
+    // Confirm MAX_RETRIES is 3 (the blocked branch is tested separately below).
     expect(MAX_RETRIES).toBe(3);
   });
 
@@ -271,6 +271,7 @@ describe("retry branch behavior via handleTurnEnd", () => {
 
     // State should have reset to selection (beadId cleared, retries 0).
     const after = getState(ctx);
+    expect(after.beadId).toBeNull();
     expect(after.retries).toBe(0);
     expect(after.phase).toBe("selecting");
   });
