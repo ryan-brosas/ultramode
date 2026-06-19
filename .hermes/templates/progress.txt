@@ -1,0 +1,21 @@
+# DENSITY: No artificial line minimum. Fill all checklist items and update the change log after every phase transition. Quality is measured by tracking completeness — every phase must be checked or unchecked, not left ambiguous. This is an AI handoff: the progress file tells the next agent where the bead left off.
+# Progress: {bead-id}
+
+## Phase Checklist
+
+- [ ] PRD written (prd.md + prd.json + decisions.md)
+- [ ] Plan written (plan.md + tasks.md + context-capsule.md)
+- [ ] Implementation — Wave 1
+- [ ] Verification gate — Wave 1
+- [ ] Implementation — Wave 2
+- [ ] Verification gate — Wave 2
+- [ ] Full verification
+- [ ] Review
+- [ ] PR
+- [ ] Close
+
+## Change Log
+
+| Date | What | Who |
+|------|------|-----|
+| {YYYY-MM-DD} | Bead created | — |
