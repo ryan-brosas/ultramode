@@ -246,7 +246,7 @@ function persistState(
  * `await pi.exec(...)` sites below) cannot leak an unhandled rejection into
  * the fire-and-forget turn_end/session_start wrappers.
  */
-async function execBounded(
+export async function execBounded(
   pi: ExtensionAPI,
   command: string,
   args: string[],
