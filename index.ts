@@ -11,6 +11,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
   ExtensionCommandContext,
+  ExecResult,
 } from "@oh-my-pi/pi-coding-agent";
 import type {
   Model,
@@ -151,6 +152,17 @@ export const MAX_RETRIES = 3;
 export const DECISION_TIMEOUT_MS = 300_000; // 5 minutes — reasoning models like GLM-5.2 need time to think
 export const DECISION_COOLDOWN_MS = 60_000; // 1 minute between decide() calls — prevents rapid-fire LLM calls
 
+// Bounded subprocess timeouts. Every pi.exec call must carry a timeout —
+// without one, a hung subprocess (corrupt .beads DB, huge repo, network
+// stall) leaves the promise pending forever. The fire-and-forget wrappers
+// around turn_end/session_start mean a hung exec does not block the agent
+// loop, but it holds a process slot, never clears the re-entrancy guards
+// (turnEndInProgress/selectionInProgress), and over time accumulates dead
+// promises that exhaust the VPS. All timeouts well above observed p99s.
+export const EXEC_TIMEOUT_FAST_MS = 10_000; // 10s — bv/br/git status (fast, local)
+export const EXEC_TIMEOUT_MED_MS = 30_000; // 30s — git diff, worktree ops, gh pr view
+export const EXEC_TIMEOUT_BUILD_MS = 60_000; // 60s — bun test / bun build
+
 // ─── State Helpers ───────────────────────────────────────────────────────────
 
 export const CONTROL_TYPE = "ultramode-control";
@@ -212,6 +224,46 @@ function persistState(
     } catch {
       // ui.notify unavailable — nothing we can do
     }
+  }
+}
+
+/**
+ * Bounded subprocess execution. Wraps pi.exec with a mandatory timeout.
+ *
+ * Every shell command ultramode spawns MUST go through this helper — a bare
+ * `pi.exec(cmd, args)` with no timeout can hang forever if the subprocess
+ * stalls (corrupt .beads DB, huge git repo, gh rate-limit stall, dead lock).
+ * Because handleTurnEnd and runSelection are fire-and-forget, a hung exec
+ * does not crash the agent loop, but it holds a process slot and — worse —
+ * never reaches the `finally` that clears the re-entrancy guards
+ * (turnEndInProgress / selectionInProgress). One hung exec permanently
+ * dead-locks that session's loop and, repeated over a 24/7 run, exhausts
+ * the VPS. The timeout is the load-bearing defense against that.
+ *
+ * On timeout (or any rejection), returns a safe empty result with `code: -1`
+ * and `killed: true` rather than throwing — so callers that already wrap in
+ * try/catch keep working unchanged, and callers that don't (the bare
+ * `await pi.exec(...)` sites below) cannot leak an unhandled rejection into
+ * the fire-and-forget turn_end/session_start wrappers.
+ */
+async function execBounded(
+  pi: ExtensionAPI,
+  command: string,
+  args: string[],
+  timeoutMs: number = EXEC_TIMEOUT_FAST_MS,
+  options?: { cwd?: string }
+): Promise<ExecResult> {
+  try {
+    return await pi.exec(command, args, {
+      timeout: timeoutMs,
+      ...options,
+    });
+  } catch {
+    // Timeout, spawn failure, or any other rejection. Return a result
+    // shaped like a failed subprocess so callers' `code === 0` checks
+    // fail closed. Never throw — a thrown timeout would bypass the
+    // re-entrancy `finally` blocks if a caller forgets try/catch.
+    return { stdout: "", stderr: "", code: -1, killed: true };
   }
 }
 
@@ -536,9 +588,7 @@ async function gatherVerificationEvidence(
   if (shouldRunHeavyChecks(phase)) {
     // Git diff — what changed?
     try {
-      const diffResult = await pi.exec("git", [
-        "diff", "--stat", "HEAD~1",
-      ]);
+      const diffResult = await execBounded(pi, "git", ["diff", "--stat", "HEAD~1"], EXEC_TIMEOUT_MED_MS);
       if (diffResult.code === 0) {
         evidence.gitDiff = truncate(diffResult.stdout, 1500);
       }
@@ -548,7 +598,7 @@ async function gatherVerificationEvidence(
 
     // Git status — uncommitted changes
     try {
-      const statusResult = await pi.exec("git", ["status", "--short"]);
+      const statusResult = await execBounded(pi, "git", ["status", "--short"], EXEC_TIMEOUT_FAST_MS);
       if (statusResult.code === 0) {
         evidence.gitStatus = truncate(statusResult.stdout, 500) || "(clean)";
       }
@@ -558,9 +608,7 @@ async function gatherVerificationEvidence(
 
     // Tests — run bun test test/ and capture exit code + output
     try {
-      const testResult = await pi.exec("bun", ["test", "test/"], {
-        timeout: 60_000,
-      });
+      const testResult = await execBounded(pi, "bun", ["test", "test/"], EXEC_TIMEOUT_BUILD_MS);
       const testOutput = truncate(testResult.stdout + "\n" + testResult.stderr, 800);
       evidence.testResult = { exitCode: testResult.code, output: testOutput };
     } catch {
@@ -569,15 +617,7 @@ async function gatherVerificationEvidence(
 
     // Build — run bun build
     try {
-      const buildResult = await pi.exec(
-        "bun",
-        [
-          "build", "index.ts", "--target", "bun",
-          "--external", "@oh-my-pi/pi-ai",
-          "--external", "@oh-my-pi/pi-coding-agent",
-        ],
-        { timeout: 30_000 }
-      );
+      const buildResult = await execBounded(pi, "bun", ["build", "index.ts", "--target", "bun", "--external", "@oh-my-pi/pi-ai", "--external", "@oh-my-pi/pi-coding-agent"], EXEC_TIMEOUT_BUILD_MS);
       evidence.buildResult = {
         exitCode: buildResult.code,
         output: truncate(buildResult.stderr, 500),
@@ -623,7 +663,7 @@ async function gatherVerificationEvidence(
   // so the LLM can review the implementation quality.
   if (phase === "shipping" && evidence.gitDiff) {
     try {
-      const fullDiff = await pi.exec("git", ["diff", "HEAD~1"]);
+      const fullDiff = await execBounded(pi, "git", ["diff", "HEAD~1"], EXEC_TIMEOUT_MED_MS);
       if (fullDiff.code === 0 && fullDiff.stdout) {
         evidence.phaseArtifactContent = `### Git Diff (full)\n${truncate(fullDiff.stdout, 3000)}`;
       }
@@ -661,17 +701,6 @@ async function gatherVerificationEvidence(
     } catch { /* skip */ }
   }
 
-  // Directory tree (depth 2) — project structure at a glance
-  try {
-    const treeResult = await pi.exec("find", [
-      ".", "-maxdepth", "2", "-not", "-path", "./.git/*",
-      "-not", "-path", "./node_modules/*", "-not", "-path", "./.beads/*",
-      "-not", "-path", "./.worktrees/*",
-    ]);
-    if (treeResult.code === 0 && treeResult.stdout) {
-      parts.push(`### Directory Structure\n${truncate(treeResult.stdout, 800)}`);
-    }
-  } catch { /* skip */ }
 
   evidence.codebaseContext = parts.join("\n\n");
 
@@ -727,7 +756,7 @@ function formatVerificationEvidence(e: VerificationEvidence): string {
   if (e.codebaseContext) {
     lines.push("");
     lines.push("## Codebase Context");
-    lines.push("This is the project's AGENTS.md, package.json, and directory structure. Use it to evaluate whether the work fits the project's conventions and architecture — not just whether it's structurally complete.");
+    lines.push("This is the project's AGENTS.md and package.json. Use it to evaluate whether the work fits the project's conventions and architecture — not just whether it's structurally complete.");
     lines.push(e.codebaseContext);
   }
 
@@ -855,11 +884,7 @@ export async function runSelection(
   // 1. bv triage
   let triageJson = "{}";
   try {
-    const triageResult = await pi.exec("bv", [
-      "--robot-triage",
-      "--format",
-      "json",
-    ]);
+    const triageResult = await execBounded(pi, "bv", ["--robot-triage", "--format", "json"], EXEC_TIMEOUT_FAST_MS);
     if (triageResult.code === 0 && triageResult.stdout) {
       triageJson = triageResult.stdout;
     }
@@ -870,7 +895,7 @@ export async function runSelection(
   // 2. br scheduler (fallback to br list)
   let schedulerJson = "{}";
   try {
-    const schedResult = await pi.exec("br", ["scheduler", "--json"]);
+    const schedResult = await execBounded(pi, "br", ["scheduler", "--json"], EXEC_TIMEOUT_FAST_MS);
     if (schedResult.code === 0 && schedResult.stdout) {
       schedulerJson = schedResult.stdout;
     }
@@ -887,14 +912,7 @@ export async function runSelection(
       // parse error — treat as empty
     }
     if (!hasRecommendations) {
-      const listResult = await pi.exec("br", [
-        "list",
-        "--status",
-        "open",
-        "--status",
-        "in_progress",
-        "--json",
-      ]);
+      const listResult = await execBounded(pi, "br", ["list", "--status", "open", "--status", "in_progress", "--json"], EXEC_TIMEOUT_FAST_MS);
       if (listResult.code === 0 && listResult.stdout) {
         schedulerJson = listResult.stdout;
       }
@@ -967,14 +985,7 @@ export async function runSelection(
   if (decision.action === "select" && decision.beadId) {
     // Claim the bead
     try {
-      await pi.exec("br", [
-        "update",
-        decision.beadId,
-        "--claim",
-        "--actor",
-        "ultramode",
-        "--json",
-      ]);
+      await execBounded(pi, "br", ["update", decision.beadId, "--claim", "--actor", "ultramode", "--json"], EXEC_TIMEOUT_FAST_MS);
     } catch {
       // claim failure is non-fatal — proceed anyway
     }
@@ -1049,17 +1060,7 @@ async function markBlocked(
 ): Promise<void> {
   if (!state.beadId) return;
   try {
-    await pi.exec("br", [
-      "update",
-      state.beadId,
-      "--status",
-      "blocked",
-      "--notes",
-      `ultramode: ${reasoning}`,
-      "--actor",
-      "ultramode",
-      "--json",
-    ]);
+    await execBounded(pi, "br", ["update", state.beadId, "--status", "blocked", "--notes", `ultramode: ${reasoning}`, "--actor", "ultramode", "--json"], EXEC_TIMEOUT_FAST_MS);
   } catch {
     // non-fatal
   }
@@ -1092,21 +1093,19 @@ async function createWorktree(
   // makes `git worktree add -b` fail with "a branch named X already
   // exists" — so delete both before creating fresh.
   try {
-    await pi.exec("git", ["worktree", "remove", "--force", worktreePath]);
+    await execBounded(pi, "git", ["worktree", "remove", "--force", worktreePath], EXEC_TIMEOUT_MED_MS);
   } catch {
     // worktree doesn't exist — fine
   }
   try {
-    await pi.exec("git", ["branch", "-D", branchName]);
+    await execBounded(pi, "git", ["branch", "-D", branchName], EXEC_TIMEOUT_FAST_MS);
   } catch {
     // branch doesn't exist — fine
   }
 
   try {
     // Create worktree with a new branch from HEAD
-    const result = await pi.exec("git", [
-      "worktree", "add", "-b", branchName, worktreePath, "HEAD",
-    ]);
+    const result = await execBounded(pi, "git", ["worktree", "add", "-b", branchName, worktreePath, "HEAD"], EXEC_TIMEOUT_MED_MS);
     if (result.code === 0) {
       ctx.ui.notify(
         `ultramode: created worktree at ${worktreePath} (branch: ${branchName})`,
@@ -1135,7 +1134,7 @@ async function removeWorktree(
 ): Promise<void> {
   if (!worktreePath) return;
   try {
-    await pi.exec("git", ["worktree", "remove", "--force", worktreePath]);
+    await execBounded(pi, "git", ["worktree", "remove", "--force", worktreePath], EXEC_TIMEOUT_MED_MS);
     ctx.ui.notify(
       `ultramode: removed worktree ${worktreePath}`,
       "info"
@@ -1154,6 +1153,12 @@ const mergeWatchers = new Map<string, ReturnType<typeof setInterval>>();
 /** Consecutive failure count per watcher. After MAX_MERGE_FAILURES the
  * watcher stops and notifies the user instead of polling forever. */
 const mergeWatcherFailures = new Map<string, number>();
+/** Tracks sessions where a merge watcher poll is in progress. Prevents
+ * overlapping polls — setInterval does not await its callback, so a slow
+ * gh call (up to 30s) or a long removeWorktree+runSelection chain (up to
+ * 5min for decide()) would overlap with the next 60s tick, accumulating
+ * unbounded promises and freezing the terminal. */
+const mergeWatcherBusy = new Set<string>();
 
 /** Poll interval for merge detection — 60 seconds. Trades latency for API
  * rate limit friendliness. GitHub merges are human-paced (minutes to hours),
@@ -1220,75 +1225,82 @@ function startMergeWatcher(
   mergeWatcherFailures.set(sessionId, 0);
 
   const timer = setInterval(async () => {
-    const current = getState(ctx);
-    if (current.mode === "off") {
-      stopMergeWatcher(sessionId);
-      return;
-    }
-
+    // Overlap guard: if the previous poll is still running (slow gh,
+    // removeWorktree, or runSelection with a long decide() call), skip
+    // this tick. setInterval does not await its callback — without this
+    // guard, each 60s tick spawns a new async chain regardless of whether
+    // the previous one finished, accumulating unbounded promises.
+    if (mergeWatcherBusy.has(sessionId)) return;
+    mergeWatcherBusy.add(sessionId);
     try {
-      const result = await pi.exec("gh", [
-        "pr", "view", String(parsed.number),
-        "--repo", parsed.repo,
-        "--json", "state,mergedAt",
-      ]);
-
-      if (result.code !== 0 || !result.stdout) {
-        bumpWatcherFailure(ctx, sessionId, parsed.number,
-          `gh exited with code ${result.code}`);
-        return;
-      }
-
-      let pr: { state: string; mergedAt: string | null };
-      try {
-        pr = JSON.parse(result.stdout) as { state: string; mergedAt: string | null };
-      } catch {
-        bumpWatcherFailure(ctx, sessionId, parsed.number,
-          "gh returned non-JSON output");
-        return;
-      }
-
-      // PR closed without merge — stop watching, notify user
-      if (pr.state === "CLOSED" && !pr.mergedAt) {
+      const current = getState(ctx);
+      if (current.mode === "off") {
         stopMergeWatcher(sessionId);
-        ctx.ui.notify(
-          `ultramode: PR #${parsed.number} closed without merging — watcher stopped. Run /ultramode continue to select new work.`,
-          "warning"
-        );
         return;
       }
 
-      if (pr.state === "MERGED" || pr.mergedAt) {
-        const latest = getState(ctx);
-        if (latest.mode === "off") {
-          stopMergeWatcher(sessionId);
+      try {
+        const result = await execBounded(pi, "gh", ["pr", "view", String(parsed.number), "--repo", parsed.repo, "--json", "state,mergedAt"], EXEC_TIMEOUT_MED_MS);
+
+        if (result.code !== 0 || !result.stdout) {
+          bumpWatcherFailure(ctx, sessionId, parsed.number,
+            `gh exited with code ${result.code}`);
           return;
         }
-        stopMergeWatcher(sessionId);
-        ctx.ui.notify(
-          `ultramode: PR #${parsed.number} merged — continuing automatically`,
-          "info"
-        );
-        await removeWorktree(pi, ctx, latest.worktreePath);
-        latest.worktreePath = null;
-        latest.prUrl = null;
-        latest.mode = "on";
-        latest.beadId = null;
-        latest.phase = "selecting";
-        latest.retries = 0;
-        latest.lastDecision = null;
-        latest.lastInjectedCommand = null;
-        latest.lastDecisionTime = null;
-        persistState(pi, ctx, latest);
-        updateWidget(ctx, latest);
-        await runSelection(pi, ctx);
-      } else {
-        // PR open but not merged — gh is working, reset failure counter
-        mergeWatcherFailures.set(sessionId, 0);
+
+        let pr: { state: string; mergedAt: string | null };
+        try {
+          pr = JSON.parse(result.stdout) as { state: string; mergedAt: string | null };
+        } catch {
+          bumpWatcherFailure(ctx, sessionId, parsed.number,
+            "gh returned non-JSON output");
+          return;
+        }
+
+        // PR closed without merge — stop watching, notify user
+        if (pr.state === "CLOSED" && !pr.mergedAt) {
+          stopMergeWatcher(sessionId);
+          ctx.ui.notify(
+            `ultramode: PR #${parsed.number} closed without merging — watcher stopped. Run /ultramode continue to select new work.`,
+            "warning"
+          );
+          return;
+        }
+
+        if (pr.state === "MERGED" || pr.mergedAt) {
+          const latest = getState(ctx);
+          if (latest.mode === "off") {
+            stopMergeWatcher(sessionId);
+            return;
+          }
+          stopMergeWatcher(sessionId);
+          ctx.ui.notify(
+            `ultramode: PR #${parsed.number} merged — continuing automatically`,
+            "info"
+          );
+          await removeWorktree(pi, ctx, latest.worktreePath);
+          latest.worktreePath = null;
+          latest.prUrl = null;
+          latest.mode = "on";
+          latest.beadId = null;
+          latest.phase = "selecting";
+          latest.retries = 0;
+          latest.lastDecision = null;
+          latest.lastInjectedCommand = null;
+          latest.lastDecisionTime = null;
+          persistState(pi, ctx, latest);
+          updateWidget(ctx, latest);
+          await runSelection(pi, ctx);
+        } else {
+          // PR open but not merged — gh is working, reset failure counter
+          mergeWatcherFailures.set(sessionId, 0);
+        }
+      } catch (err) {
+        bumpWatcherFailure(ctx, sessionId, parsed.number,
+          err instanceof Error ? err.message : String(err));
       }
-    } catch (err) {
-      bumpWatcherFailure(ctx, sessionId, parsed.number,
-        err instanceof Error ? err.message : String(err));
+    } finally {
+      mergeWatcherBusy.delete(sessionId);
     }
   }, MERGE_POLL_MS);
 
@@ -1302,6 +1314,7 @@ function stopMergeWatcher(sessionId: string): void {
     clearInterval(timer);
     mergeWatchers.delete(sessionId);
     mergeWatcherFailures.delete(sessionId);
+    mergeWatcherBusy.delete(sessionId);
   }
 }
 
@@ -1351,13 +1364,9 @@ export async function handleTurnEnd(
   // Fetch bv triage for context (cached-ish — re-fetch each decision)
   let triageJson = "{}";
   try {
-    const triageResult = await pi.exec("bv", [
-      "--robot-triage",
-      "--format",
-      "json",
-    ]);
+    const triageResult = await execBounded(pi, "bv", ["--robot-triage", "--format", "json"], EXEC_TIMEOUT_FAST_MS);
     if (triageResult.code === 0 && triageResult.stdout) {
-      triageJson = triageResult.stdout;
+      triageJson = truncate(triageResult.stdout, 2000);
     }
   } catch {
     // non-fatal
@@ -1622,7 +1631,7 @@ export default function ultramode(pi: ExtensionAPI): void {
       );
     }
 
-    if (state.mode === "on") {
+    if (state.mode === "on" && state.phase === "selecting" && !state.beadId) {
       // Fire-and-forget — don't block session start. But catch errors so
       // a rejected sendUserMessage or persistState doesn't become an
       // unhandled rejection that crashes the extension.

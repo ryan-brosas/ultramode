@@ -65,6 +65,10 @@ describe("phase-gated evidence gathering", () => {
         cmd === "git" && args[0] === "diff"
     );
     expect(gitDiffCalls).toHaveLength(0);
+
+    // Directory walking is also a subprocess and must be skipped in light phases.
+    const findCalls = execCalls.filter(([cmd]) => cmd === "find");
+    expect(findCalls).toHaveLength(0);
   });
 
   test("handleTurnEnd with shipping phase spawns bun test and bun build", async () => {
@@ -208,6 +212,90 @@ describe("rate-limited decision calls", () => {
     expect(execCalls.length).toBeGreaterThanOrEqual(1);
   });
 });
+
+// ─── Deliverable 3: session_start must not restart selection mid-phase ───────
+// On process/session restart, persisted active phase state means a bead is
+// already in progress. session_start must only resume selection when state is
+// selecting with no bead; otherwise it spawns bv/br/LLM work on every reload.
+
+describe("session_start active phase resume", () => {
+  test("does not run selection when persisted state is mid-phase", async () => {
+    installPiAiMock({
+      complete: async () => ({
+        content: [{ type: "text", text: JSON.stringify({ action: "wait", reasoning: "test" }) }],
+      }),
+    });
+
+    const { default: ultramode } = await importIndex("session-start-mid-phase");
+    const pi = mockExtensionAPI();
+    const ctx = mockExtensionContext({
+      sessionEntries: [
+        {
+          type: "custom",
+          customType: "ultramode-control",
+          data: {
+            mode: "on",
+            beadId: "ultramode-test",
+            phase: "shipping",
+            retries: 0,
+            lastDecision: null,
+            worktreePath: ".worktrees/ultramode-test",
+            lastInjectedCommand: "ship command",
+            retryFeedback: null,
+            prUrl: null,
+            lastDecisionTime: null,
+          },
+        },
+      ],
+    });
+
+    ultramode(pi);
+    const handler = (pi as unknown as MockExtensionAPI).onHandlers.get(
+      "session_start"
+    );
+    expect(handler).toBeDefined();
+
+    await handler?.({}, ctx);
+
+    const execCalls = (pi as unknown as MockExtensionAPI).exec.calls;
+    expect(execCalls).toHaveLength(0);
+  });
+});
+
+// ─── Deliverable 4: bounded decision prompt context ──────────────────────────
+// bv can produce large JSON. The phase-decision prompt must cap that context so
+// a large graph snapshot does not dominate every LLM decision.
+
+describe("bounded decision prompt context", () => {
+  test("truncates large bv triage output before calling complete", async () => {
+    const stopJson = JSON.stringify({ action: "stop", reasoning: "test" });
+    const largeTriage = "x".repeat(5_000);
+    let capturedPrompt = "";
+    installPiAiMock({
+      complete: async (_model, context) => {
+        const messages = (context as { messages: Array<{ content: string }> }).messages;
+        capturedPrompt = messages[0]?.content ?? "";
+        return { content: [{ type: "text", text: stopJson }] };
+      },
+    });
+
+    const { handleTurnEnd, getState } = await importIndex("bounded-triage");
+    const pi = mockExtensionAPI({
+      execResults: [{ stdout: largeTriage, code: 0 }],
+    });
+    const ctx = mockExtensionContext();
+
+    const state = getState(ctx);
+    state.mode = "on";
+    state.beadId = "ultramode-test";
+    state.phase = "planning";
+
+    await handleTurnEnd(pi, ctx, { content: "assistant output" });
+
+    expect(capturedPrompt).not.toContain("x".repeat(3_000));
+  });
+});
+
 
 // ─── Deliverable 4: persistState surfaces failures ─────────────────────────
 // persistState() must call ui.notify("warning") when appendEntry throws.

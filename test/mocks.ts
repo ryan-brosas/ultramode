@@ -86,7 +86,10 @@ export interface MockAPIOverrides {
 }
 
 export interface MockExtensionAPI {
-  exec: Spy<[string, string[]], Promise<{ stdout: string; code: number }>>;
+  exec: Spy<
+    [string, string[], { timeout?: number; cwd?: string }?],
+    Promise<{ stdout: string; stderr?: string; code: number; killed?: boolean }>
+  >;
   sendUserMessage: Spy<[string, { deliverAs?: "steer" | "followUp" }?], void>;
   appendEntry: Spy<[string, unknown], void>;
   registerCommand: Spy<
@@ -104,8 +107,15 @@ export function mockExtensionAPI(overrides: MockAPIOverrides = {}): MockExtensio
   let execCallIndex = 0;
   const onHandlers = new Map<string, (...args: readonly unknown[]) => MaybePromise<unknown>>();
   const api: MockExtensionAPI = {
-    exec: createSpy<[string, string[]], Promise<{ stdout: string; code: number }>>(
-      async (_cmd: string, args: string[]) => {
+    exec: createSpy<
+      [string, string[], { timeout?: number; cwd?: string }?],
+      Promise<{ stdout: string; stderr?: string; code: number; killed?: boolean }>
+    >(
+      async (
+        _cmd: string,
+        args: string[],
+        _options?: { timeout?: number; cwd?: string }
+      ) => {
         void args;
         if (overrides.execResults && overrides.execResults.length > 0) {
           const result = overrides.execResults[
@@ -140,8 +150,8 @@ export function mockExtensionAPI(overrides: MockAPIOverrides = {}): MockExtensio
 }
 
 interface PiAiMockOverrides {
-  complete?: () => MaybePromise<unknown>;
-  completeSimple?: () => MaybePromise<unknown>;
+  complete?: (...args: unknown[]) => MaybePromise<unknown>;
+  completeSimple?: (...args: unknown[]) => MaybePromise<unknown>;
 }
 
 export function installPiAiMock(overrides: PiAiMockOverrides = {}): void {
